@@ -45,11 +45,7 @@ export default function ProductsPage({ store, onNavigate }: ProductsPageProps) {
 
   const filtered = useMemo(() => {
     let result = products.filter(p => {
-      const query = search.toLowerCase();
-      const matchesSearch =
-        p.name.toLowerCase().includes(query) ||
-        (p.sku && p.sku.toLowerCase().includes(query)) ||
-        (p.barcode && p.barcode.toLowerCase().includes(query));
+      const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()));
       const matchesCategory = filterCategory === 'all' || String(p.category_id) === String(filterCategory);
       return matchesSearch && matchesCategory;
     });
@@ -334,19 +330,14 @@ function ProductFormModal({ product, categories, storeId, onClose, onSave }: Pro
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-600 mb-1.5 block">Barcode (scan produk)</label>
+              <label className="text-sm font-medium text-gray-600 mb-1.5 block">Barcode</label>
               <input
                 type="text"
                 value={form.barcode ?? ''}
                 onChange={e => setForm({ ...form, barcode: e.target.value })}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') e.preventDefault();
-                }}
-                autoComplete="off"
                 className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 transition-all font-mono"
-                placeholder="Scan barcode produk"
+                placeholder="8901234567890"
               />
-              <p className="mt-1 text-[11px] text-gray-500">Fokuskan kolom ini lalu scan barcode. Kode tersimpan sebagai barcode produk.</p>
             </div>
           </div>
 

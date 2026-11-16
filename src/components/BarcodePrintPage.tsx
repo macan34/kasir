@@ -1,3 +1,9 @@
+
+
+
+
+
+
 import { useState, useEffect, useRef } from 'react';
 import { Printer, Search, Loader2 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
@@ -12,24 +18,6 @@ function escapeHtml(value: string) {
     '"': '&quot;',
     "'": '&#39;',
   })[character] || character);
-}
-
-function ProductBarcode({ value }: { value: string }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-
-  useEffect(() => {
-    if (svgRef.current && value) {
-      JsBarcode(svgRef.current, value, {
-        format: 'CODE128',
-        displayValue: false,
-        height: 40,
-        margin: 0,
-        width: 1.5,
-      });
-    }
-  }, [value]);
-
-  return <svg ref={svgRef} className="max-w-full h-10" aria-label={`Barcode ${value}`} />;
 }
 
 export default function BarcodePrintPage() {
@@ -56,12 +44,9 @@ export default function BarcodePrintPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = products.filter(p => {
-    const query = search.toLowerCase();
-    return p.name.toLowerCase().includes(query) ||
-      p.sku.toLowerCase().includes(query) ||
-      (p.barcode || '').toLowerCase().includes(query);
-  });
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())
+  );
 
   const toggleSelect = (id: string | number) => {
     setSelectedProducts(prev => {
@@ -260,7 +245,7 @@ export default function BarcodePrintPage() {
                     className="rounded text-orange-500 focus:ring-orange-400"
                   />
                   <span className="font-medium text-gray-800">{p.name}</span>
-                  <span className="font-mono text-xs text-gray-400">({p.barcode?.trim() || p.sku})</span>
+                  <span className="font-mono text-xs text-gray-400">({p.sku})</span>
                 </label>
                 {isSelected && (
                   <div className="flex items-center gap-1.5">
@@ -300,10 +285,40 @@ export default function BarcodePrintPage() {
                 <div className="text-[11px] font-bold text-orange-600 print:text-black my-1">
                   Rp {item.product.price.toLocaleString('id-ID')}
                 </div>
+                {/* Visual Barcode SVG simulation */}
+                {/* Visual Barcode SVG simulation */}
+                {/* Visual Barcode SVG simulation */}
+                {/* Visual Barcode SVG simulation */}
+                {/* Visual Barcode SVG simulation */}
                 <div className="w-full flex justify-center my-1">
-                  <ProductBarcode value={item.product.barcode?.trim() || item.product.sku} />
+                  <svg className="w-36 h-10" viewBox="0 0 100 25">
+                    <rect x="2" y="0" width="2" height="25" fill="#000" />
+                    <rect x="6" y="0" width="1" height="25" fill="#000" />
+                    <rect x="9" y="0" width="3" height="25" fill="#000" />
+                    <rect x="14" y="0" width="1" height="25" fill="#000" />
+                    <rect x="17" y="0" width="2" height="25" fill="#000" />
+                    <rect x="21" y="0" width="4" height="25" fill="#000" />
+                    <rect x="27" y="0" width="1" height="25" fill="#000" />
+                    <rect x="30" y="0" width="2" height="25" fill="#000" />
+                    <rect x="34" y="0" width="3" height="25" fill="#000" />
+                    <rect x="39" y="0" width="1" height="25" fill="#000" />
+                    <rect x="42" y="0" width="2" height="25" fill="#000" />
+                    <rect x="46" y="0" width="4" height="25" fill="#000" />
+                    <rect x="52" y="0" width="1" height="25" fill="#000" />
+                    <rect x="55" y="0" width="3" height="25" fill="#000" />
+                    <rect x="60" y="0" width="2" height="25" fill="#000" />
+                    <rect x="64" y="0" width="1" height="25" fill="#000" />
+                    <rect x="67" y="0" width="3" height="25" fill="#000" />
+                    <rect x="72" y="0" width="2" height="25" fill="#000" />
+                    <rect x="76" y="0" width="1" height="25" fill="#000" />
+                    <rect x="79" y="0" width="4" height="25" fill="#000" />
+                    <rect x="85" y="0" width="2" height="25" fill="#000" />
+                    <rect x="89" y="0" width="1" height="25" fill="#000" />
+                    <rect x="92" y="0" width="3" height="25" fill="#000" />
+                    <rect x="97" y="0" width="1" height="25" fill="#000" />
+                  </svg>
                 </div>
-                <div className="font-mono text-[10px] text-gray-700 tracking-wider">{item.product.barcode?.trim() || item.product.sku}</div>
+                <div className="font-mono text-[10px] text-gray-700 tracking-wider">{item.product.sku}</div>
               </div>
             ))}
           </div>
