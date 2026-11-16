@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 2px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #d1d5db;
+}
+
+/* ========================================================
+   Thermal Receipt Print Styles (Optimized for Epson TM-T82X)
+   Paper Roll: 80mm (Effective print area ~72mm)
+   ======================================================== */
+@media print {
+  @page {
+    size: 80mm 300mm;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    min-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #epson-thermal-receipt,
+  #epson-thermal-receipt * {
+    visibility: visible !important;
+    display: block !important;
+  }
+
+  #epson-thermal-receipt {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    padding: 2mm 3mm 10mm 3mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+
