@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
+
+router.use(requireRole('superadmin'));
 
 // GET /api/stock - Get all stock information
 router.get('/', async (req, res) => {

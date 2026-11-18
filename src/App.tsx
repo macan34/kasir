@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import DashboardContent from '@/components/DashboardContent';
 import POSScreen from '@/components/POSScreen';
+import OrdersPage from '@/components/OrdersPage';
+import CustomerOrdersPanel from '@/components/CustomerOrdersPanel';
 import ProductsPage from '@/components/ProductsPage';
 import TransactionsPage from '@/components/TransactionsPage';
 import CategoriesPage from '@/components/CategoriesPage';
@@ -10,34 +12,100 @@ import ManageStockPage from '@/components/ManageStockPage';
 import CustomersPage from '@/components/CustomersPage';
 import BarcodePrintPage from '@/components/BarcodePrintPage';
 import ActivityLogsPage from '@/components/ActivityLogsPage';
-import { api } from '@/lib/api';
+import WelcomePage from '@/components/WelcomePage';
+import { ShoppingCart } from 'lucide-react';
+import { api, type AppUser } from '@/lib/api';
 import type { Store } from '@/types';
 
 function App() {
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeItem, setActiveItem] = useState('dashboard');
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
 
-  useEffect(() => {
-    api.stores.getAll().then((data: Store[]) => {
+  const fetchStores = useCallback(async () => {
+    try {
+      const data: Store[] = await api.stores.getAll();
       if (data && data.length > 0) {
         setStores(data);
         setSelectedStore(data[0]);
       }
-    }).catch(err => {
+    } catch (err) {
       console.error('Failed to load stores from local database:', err);
-    });
+    }
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('retaillet-token');
+    if (token) {
+      api.auth.getCurrentUser()
+        .then(currentUser => {
+          setUser(currentUser);
+          setActiveItem(currentUser.role === 'cashier' ? 'pos' : 'dashboard');
+          void fetchStores();
+        })
+        .catch(err => {
+          console.error('Stored login session is no longer valid:', err);
+          localStorage.removeItem('retaillet-token');
+        })
+        .finally(() => setAuthLoading(false));
+    } else {
+      setAuthLoading(false);
+    }
+  }, [fetchStores]);
+
+  useEffect(() => {
+    const handleExpiredSession = () => {
+      setUser(null);
+      setActiveItem('dashboard');
+    };
+    window.addEventListener('retaillet:session-expired', handleExpiredSession);
+    return () => window.removeEventListener('retaillet:session-expired', handleExpiredSession);
   }, []);
 
   function handleNavigate(page: string) {
+    if (user?.role === 'customer') return;
+    if (user?.role === 'cashier' && page !== 'pos' && page !== 'orders' && page !== 'transactions') return;
+    if (page === 'super-admin' && user?.role !== 'superadmin') return;
     setActiveItem(page);
     setMobileOpen(false);
     window.scrollTo(0, 0);
   }
 
-  function renderContent() {
+  async function handleLogin(expectedRole: AppUser['role'], username: string, password: string) {
+    const result = await api.auth.login(username, password);
+    if (result.user.role !== expectedRole) {
+      localStorage.setItem('retaillet-token', result.token);
+      try {
+        await api.auth.logout();
+      } finally {
+        localStorage.removeItem('retaillet-token');
+      }
+      throw new Error(`Akun ini terdaftar sebagai ${result.user.role}, bukan peran yang dipilih.`);
+    }
+    localStorage.setItem('retaillet-token', result.token);
+    setUser(result.user);
+    setActiveItem(result.user.role === 'cashier' ? 'pos' : 'dashboard');
+    void fetchStores();
+    return result.user;
+  }
+
+  async function handleLogout() {
+    try {
+      await api.auth.logout();
+    } catch (err) {
+      console.error('Failed to revoke server login session:', err);
+    } finally {
+      localStorage.removeItem('retaillet-token');
+      setUser(null);
+      setActiveItem('dashboard');
+    }
+  }
+
+  function renderContent(cashierName: string, role: AppUser['role']) {
     switch (activeItem) {
       case 'dashboard':
         return <DashboardContent onNavigate={handleNavigate} />;
@@ -51,13 +119,18 @@ function App() {
                 Printer: Epson TM-T82X Ready
               </span>
             </div>
-            <POSScreen store={selectedStore} />
+            <POSScreen store={selectedStore} cashierName={cashierName} />
           </div>
         );
       
       case 'transactions':
       case 'invoices':
         return <TransactionsPage store={selectedStore} />;
+
+      case 'orders':
+        return role === 'superadmin' || role === 'cashier'
+          ? <OrdersPage />
+          : <DashboardContent onNavigate={handleNavigate} />;
 
       case 'products':
       case 'create-product':
@@ -86,11 +159,48 @@ function App() {
         return <BarcodePrintPage />;
 
       case 'super-admin':
-        return <ActivityLogsPage />;
+        return role === 'superadmin' ? <ActivityLogsPage /> : <DashboardContent onNavigate={handleNavigate} />;
 
       default:
         return <DashboardContent onNavigate={handleNavigate} />;
     }
+  }
+
+  if (authLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-orange-400">Memeriksa sesi...</div>;
+  }
+  if (!user) return <WelcomePage onLogin={handleLogin} />;
+
+  if (user.role === 'customer') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-500">
+              <ShoppingCart className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <p className="font-bold text-gray-800">Retaillet</p>
+              <p className="text-xs text-gray-500">Katalog Produk</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-sm text-gray-600 sm:inline">Hai, {user.name}</span>
+            <button onClick={handleLogout} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+              Keluar
+            </button>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
+          <div className="mb-4">
+            <h1 className="text-xl font-bold text-gray-800">Belanja Produk</h1>
+            <p className="text-sm text-gray-500">Pilih produk untuk dimasukkan ke keranjang dan buat pesanan.</p>
+          </div>
+          <POSScreen store={selectedStore} mode="customer" customerName={user.name} />
+          <CustomerOrdersPanel />
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -102,6 +212,7 @@ function App() {
           onToggle={() => setCollapsed(!collapsed)}
           activeItem={activeItem}
           onSelect={handleNavigate}
+          role={user.role}
         />
       </div>
 
@@ -115,6 +226,7 @@ function App() {
               onToggle={() => setMobileOpen(false)}
               activeItem={activeItem}
               onSelect={handleNavigate}
+              role={user.role}
             />
           </div>
         </>
@@ -128,9 +240,12 @@ function App() {
           selectedStore={selectedStore}
           onStoreChange={setSelectedStore}
           onNavigate={handleNavigate}
+          userName={user.name}
+          userRole={user.role}
+          onLogout={handleLogout}
         />
         <main className="p-4 sm:p-6 max-w-[1600px] mx-auto">
-          {renderContent()}
+          {renderContent(user.name, user.role)}
         </main>
       </div>
     </div>

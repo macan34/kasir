@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  Search, Plus, ShoppingCart, Globe, Maximize2, Minimize2, Bell,
+  Search, Plus, ShoppingCart, Maximize2, Minimize2,
   ChevronDown, Store, FilePlus, PackagePlus,
-  UserPlus, FileText, LogOut, User, Settings, Menu
+  UserPlus, FileText, LogOut, Menu
 } from 'lucide-react';
 import type { Store as StoreType } from '@/types';
+import type { AppRole } from '@/lib/api';
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -12,9 +13,12 @@ interface HeaderProps {
   selectedStore: StoreType | null;
   onStoreChange: (store: StoreType) => void;
   onNavigate: (page: string) => void;
+  userName: string;
+  userRole: AppRole;
+  onLogout: () => void;
 }
 
-export default function Header({ onMenuToggle, stores, selectedStore, onStoreChange, onNavigate }: HeaderProps) {
+export default function Header({ onMenuToggle, stores, selectedStore, onStoreChange, onNavigate, userName, userRole, onLogout }: HeaderProps) {
   const [storeOpen, setStoreOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -58,7 +62,7 @@ export default function Header({ onMenuToggle, stores, selectedStore, onStoreCha
           <Menu className="w-5 h-5" />
         </button>
 
-        <div className="relative max-w-md flex-1 hidden sm:block">
+        {userRole !== 'cashier' && <div className="relative max-w-md flex-1 hidden sm:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
@@ -66,7 +70,7 @@ export default function Header({ onMenuToggle, stores, selectedStore, onStoreCha
             className="w-full pl-10 pr-12 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 transition-all"
           />
           <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-400 bg-white border border-gray-200 rounded px-1.5 py-0.5">⌘K</kbd>
-        </div>
+        </div>}
 
         {/* Store selector */}
         <div ref={storeRef} className="relative">
@@ -97,6 +101,7 @@ export default function Header({ onMenuToggle, stores, selectedStore, onStoreCha
       {/* Right: Actions */}
       <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Add New */}
+        {userRole === 'superadmin' && (
         <div ref={addRef} className="relative">
           <button
             onClick={() => setAddOpen(!addOpen)}
@@ -121,6 +126,7 @@ export default function Header({ onMenuToggle, stores, selectedStore, onStoreCha
             </div>
           )}
         </div>
+        )}
 
         {/* POS Button */}
         <button
@@ -143,13 +149,25 @@ export default function Header({ onMenuToggle, stores, selectedStore, onStoreCha
             className="flex items-center gap-2 p-1 pr-2 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-bold">
-              A
+              {userName.slice(0, 1).toUpperCase()}
             </div>
             <div className="hidden lg:block text-left">
-              <div className="text-sm font-semibold text-gray-800 leading-tight">Admin User</div>
-              <div className="text-xs text-emerald-600 font-medium">Local MySQL (Online)</div>
+              <div className="text-sm font-semibold text-gray-800 leading-tight">{userName}</div>
+              <div className="text-xs text-emerald-600 font-medium">
+                {userRole === 'superadmin' ? 'Super Admin' : 'Kasir'}
+              </div>
             </div>
           </button>
+          {profileOpen && (
+            <div className="absolute right-0 top-full z-50 mt-2 w-44 rounded-xl border border-gray-200 bg-white py-2 shadow-xl">
+              <button
+                onClick={() => { setProfileOpen(false); onLogout(); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <LogOut className="h-4 w-4 text-gray-400" /> Keluar
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

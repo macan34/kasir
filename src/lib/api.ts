@@ -1,10 +1,21 @@
+import type { Sale, SaleItem } from '@/types';
+
 const API_BASE = '/api';
 
 async function fetchJSON(url: string, options?: RequestInit) {
+  const headers = new Headers(options?.headers);
+  headers.set('Content-Type', 'application/json');
+  const token = localStorage.getItem('retaillet-token');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers,
   });
+  if (res.status === 401 && token && !url.endsWith('/auth/login')) {
+    localStorage.removeItem('retaillet-token');
+    window.dispatchEvent(new Event('retaillet:session-expired'));
+  }
   if (!res.ok) {
     const errorBody = await res.text();
     let message = errorBody || `HTTP ${res.status}`;
@@ -17,6 +28,20 @@ async function fetchJSON(url: string, options?: RequestInit) {
     throw new Error(message);
   }
   return res.json();
+}
+
+export type AppRole = 'superadmin' | 'cashier' | 'customer';
+
+export interface AppUser {
+  id: number;
+  username: string;
+  name: string;
+  role: AppRole;
+}
+
+export interface UserAccount extends AppUser {
+  is_active: boolean | number;
+  created_at?: string;
 }
 
 export interface ProductInput {
@@ -44,6 +69,42 @@ export interface CustomerRecord {
 }
 
 export const api = {
+  auth: {
+    getStatus: async (): Promise<{ setup_required: boolean }> => fetchJSON(`${API_BASE}/auth/status`),
+    login: async (username: string, password: string): Promise<{ token: string; user: AppUser }> => {
+      return fetchJSON(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+    },
+    getCurrentUser: async (): Promise<AppUser> => fetchJSON(`${API_BASE}/auth/me`),
+    logout: async () => fetchJSON(`${API_BASE}/auth/logout`, { method: 'POST' }),
+  },
+
+  users: {
+    getAll: async (): Promise<UserAccount[]> => fetchJSON(`${API_BASE}/users`),
+    create: async (data: {
+      username: string;
+      name: string;
+      password: string;
+      role: 'cashier' | 'customer';
+    }): Promise<UserAccount> => fetchJSON(`${API_BASE}/users`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: async (id: number, data: {
+      username: string;
+      name: string;
+      password?: string;
+      role: 'cashier' | 'customer';
+      is_active: boolean;
+    }): Promise<UserAccount> => fetchJSON(`${API_BASE}/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    delete: async (id: number) => fetchJSON(`${API_BASE}/users/${id}`, { method: 'DELETE' }),
+  },
+
   stores: {
     getAll: async () => {
       return fetchJSON(`${API_BASE}/stores`);
@@ -109,14 +170,22 @@ export const api = {
   },
 
   sales: {
-    getAll: async (params?: { dateFrom?: string }) => {
+    getAll: async (params?: { dateFrom?: string }): Promise<Sale[]> => {
       const query = new URLSearchParams();
       if (params?.dateFrom) query.set('date_from', params.dateFrom);
       const qs = query.toString();
       return fetchJSON(`${API_BASE}/sales${qs ? `?${qs}` : ''}`);
     },
-    getById: async (id: string | number) => {
+    getById: async (id: string | number): Promise<Sale & { items: SaleItem[] }> => {
       return fetchJSON(`${API_BASE}/sales/${id}`);
+    },
+    getOrders: async (): Promise<Sale[]> => fetchJSON(`${API_BASE}/sales/orders`),
+    getMyOrders: async (): Promise<Sale[]> => fetchJSON(`${API_BASE}/sales/my-orders`),
+    payDummy: async (id: string | number): Promise<{ success: boolean; payment_status: string; order_status: string }> => {
+      return fetchJSON(`${API_BASE}/sales/${id}/pay-dummy`, { method: 'POST' });
+    },
+    approveOrder: async (id: string | number): Promise<{ success: boolean; order_status: string }> => {
+      return fetchJSON(`${API_BASE}/sales/${id}/approve`, { method: 'POST' });
     },
     create: async (data: {
       invoice_number: string;
@@ -128,7 +197,7 @@ export const api = {
       total: number;
       payment_method: string;
       payment_status: string;
-    }) => {
+    }): Promise<Sale> => {
       return fetchJSON(`${API_BASE}/sales`, {
         method: 'POST',
         body: JSON.stringify(data),

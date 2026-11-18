@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
 
 // Helper to check which columns exist in tbl_produk
 let columnsChecked = false;
@@ -118,7 +119,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/products - Create a product
-router.post('/', async (req, res) => {
+router.post('/', requireRole('superadmin'), async (req, res) => {
   try {
     const { name, sku, barcode, category_id, store_id, price, cost, stock_quantity, low_stock_threshold, unit, image_url } = req.body;
     const hasExtras = await checkColumns();
@@ -168,7 +169,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/products/:id - Update product
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, sku, barcode, category_id, store_id, price, cost, stock_quantity, low_stock_threshold, unit, image_url } = req.body;
@@ -205,25 +206,28 @@ router.put('/:id', async (req, res) => {
 });
 
 // PUT /api/products/:id/stock - Update stock quantity only
-router.put('/:id/stock', async (req, res) => {
+router.put('/:id/stock', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { stock_quantity } = req.body;
+    const stockQuantity = Number(req.body.stock_quantity);
+    if (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0) {
+      return res.status(400).json({ error: 'Jumlah stok harus bilangan bulat tidak negatif.' });
+    }
 
     const hasExtras = await checkColumns();
     if (hasExtras) {
       await pool.query(
         'UPDATE tbl_produk SET stok = ?, updated_at = NOW() WHERE id_produk = ?',
-        [stock_quantity, id]
+        [stockQuantity, id]
       );
     } else {
       await pool.query(
         'UPDATE tbl_produk SET stok = ? WHERE id_produk = ?',
-        [stock_quantity, id]
+        [stockQuantity, id]
       );
     }
 
-    res.json({ id: parseInt(id, 10), stock_quantity, updated_at: new Date().toISOString() });
+    res.json({ id: parseInt(id, 10), stock_quantity: stockQuantity, updated_at: new Date().toISOString() });
   } catch (err) {
     console.error('Error updating stock:', err);
     res.status(500).json({ error: err.message });
@@ -231,7 +235,7 @@ router.put('/:id/stock', async (req, res) => {
 });
 
 // DELETE /api/products/:id - Delete product
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM tbl_produk WHERE id_produk = ?', [id]);

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, History, UserCheck, Search, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import CustomersPage from '@/components/CustomersPage';
+import UsersManagementPage from '@/components/UsersManagementPage';
 
 interface LogItem {
   id: number;
@@ -20,7 +22,7 @@ export default function ActivityLogsPage() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [custLogs, setCustLogs] = useState<CustomerChangeLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'system' | 'customer'>('system');
+  const [tab, setTab] = useState<'system' | 'history' | 'accounts' | 'customers'>('accounts');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -54,27 +56,37 @@ export default function ActivityLogsPage() {
           <h1 className="text-xl font-bold text-gray-800">Super Admin & Audit Log</h1>
           <p className="text-sm text-gray-500">Catatan log aktivitas & perubahan data otomatis dari trigger MySQL</p>
         </div>
-        <div className="flex gap-2 bg-gray-100 p-1 rounded-xl">
+        <div className="flex flex-wrap gap-2 bg-gray-100 p-1 rounded-xl">
           <button
-            onClick={() => setTab('system')}
+            onClick={() => setTab('accounts')}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-              tab === 'system' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              tab === 'accounts' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Log Sistem (tbl_log)
+            Akun Pengguna
           </button>
           <button
-            onClick={() => setTab('customer')}
+            onClick={() => setTab('customers')}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-              tab === 'customer' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              tab === 'customers' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Log Perubahan Nama (Trigger)
+            Data Pelanggan
+          </button>
+          <button onClick={() => setTab('system')} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${tab === 'system' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+            Log Sistem
+          </button>
+          <button onClick={() => setTab('history')} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${tab === 'history' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+            Riwayat Pelanggan
           </button>
         </div>
       </div>
 
-      {tab === 'system' ? (
+      {tab === 'accounts' ? (
+        <UsersManagementPage />
+      ) : tab === 'customers' ? (
+        <CustomersPage />
+      ) : tab === 'system' ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden p-4">
           <div className="mb-3">
             <input

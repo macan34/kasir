@@ -72,7 +72,11 @@ ALTER TABLE `tbl_transaksi`
   ADD COLUMN IF NOT EXISTS `discount_amount` DECIMAL(12,2) DEFAULT 0 AFTER `tax_amount`,
   ADD COLUMN IF NOT EXISTS `payment_method` VARCHAR(20) DEFAULT 'cash' AFTER `discount_amount`,
   ADD COLUMN IF NOT EXISTS `payment_status` VARCHAR(20) DEFAULT 'paid' AFTER `payment_method`,
-  ADD COLUMN IF NOT EXISTS `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `payment_status`;
+  ADD COLUMN IF NOT EXISTS `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `payment_status`,
+  ADD COLUMN IF NOT EXISTS `order_status` VARCHAR(24) NOT NULL DEFAULT 'approved' AFTER `created_at`,
+  ADD COLUMN IF NOT EXISTS `created_by_user_id` BIGINT UNSIGNED NULL AFTER `order_status`,
+  ADD COLUMN IF NOT EXISTS `approved_by_user_id` BIGINT UNSIGNED NULL AFTER `created_by_user_id`,
+  ADD COLUMN IF NOT EXISTS `approved_at` TIMESTAMP NULL DEFAULT NULL AFTER `approved_by_user_id`;
 
 -- Add FK for store_id on transaksi
 DELIMITER $$

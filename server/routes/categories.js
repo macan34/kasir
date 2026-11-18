@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
 
 // GET /api/categories - List all categories from tbl_kategori
 router.get('/', async (req, res) => {
@@ -16,7 +17,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/categories - Create category
-router.post('/', async (req, res) => {
+router.post('/', requireRole('superadmin'), async (req, res) => {
   try {
     const { name, description } = req.body;
     const [result] = await pool.query(
@@ -34,7 +35,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/categories/:id - Update category
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name } = req.body;
@@ -47,7 +48,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/categories/:id - Delete category
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM tbl_kategori WHERE id_kategori = ?', [id]);

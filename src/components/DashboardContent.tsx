@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Calendar, X, AlertTriangle, Package, ShoppingCart, Users,
   Loader2, DollarSign
@@ -15,30 +15,32 @@ interface DashboardContentProps {
 
 export default function DashboardContent({ onNavigate }: DashboardContentProps) {
   const [showAlert, setShowAlert] = useState(true);
-  const [dateRange, setDateRange] = useState('Today');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [todaySales, setTodaySales] = useState<Sale[]>([]);
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
   const [productCount, setProductCount] = useState(0);
 
-  useEffect(() => { fetchDashboardData(); }, []);
-
-  async function fetchDashboardData() {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
-    const today = new Date().toISOString().split('T')[0];
+    setError(null);
+    const now = new Date();
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
     try {
       const [sales, prods, custs] = await Promise.all([
         api.sales.getAll({ dateFrom: today }),
         api.products.getAll(),
-        api.sales.getCustomers(),
+        api.customers.getAll(),
       ]);
 
       if (sales) {
         setTodaySales(sales);
-        setTodayRevenue(sales.reduce((sum: number, s: Sale) => sum + Number(s.total), 0));
+        setTodayRevenue(sales
+          .filter((sale: Sale) => String(sale.payment_status).toLowerCase() === 'paid')
+          .reduce((sum: number, sale: Sale) => sum + Number(sale.total), 0));
       }
 
       if (prods) {
@@ -55,22 +57,36 @@ export default function DashboardContent({ onNavigate }: DashboardContentProps) 
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
+      setError(err instanceof Error ? err.message : 'Gagal mengambil data dashboard dari database.');
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => { void fetchDashboardData(); }, [fetchDashboardData]);
 
   const todayStats = [
-    { icon: ShoppingCart, label: 'Orders Today', value: `${todaySales.length}`, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { icon: Package, label: 'Products', value: productCount.toString(), color: 'text-teal-600', bg: 'bg-teal-50' },
-    { icon: Users, label: 'Customers', value: totalCustomers.toString(), color: 'text-blue-600', bg: 'bg-blue-50' },
-    { icon: DollarSign, label: 'Revenue Today', value: `Rp ${(todayRevenue / 1000).toFixed(0)}K`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { icon: ShoppingCart, label: 'Transaksi Hari Ini', value: `${todaySales.length}`, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { icon: Package, label: 'Produk', value: productCount.toLocaleString('id-ID'), color: 'text-teal-600', bg: 'bg-teal-50' },
+    { icon: Users, label: 'Pelanggan', value: totalCustomers.toLocaleString('id-ID'), color: 'text-blue-600', bg: 'bg-blue-50' },
+    { icon: DollarSign, label: 'Penjualan Lunas Hari Ini', value: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(todayRevenue), color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+        <p>Data dashboard tidak dapat dimuat: {error}</p>
+        <button onClick={() => void fetchDashboardData()} className="mt-2 font-semibold underline">
+          Coba lagi
+        </button>
       </div>
     );
   }
@@ -83,19 +99,14 @@ export default function DashboardContent({ onNavigate }: DashboardContentProps) 
       <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Welcome, Admin (Local MySQL)</h1>
-            <p className="text-sm text-gray-500 mt-1">You have <span className="font-semibold text-orange-600">{todaySales.length} Orders</span> Today</p>
+            <h1 className="text-2xl font-bold text-gray-800">Ringkasan Database</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              <span className="font-semibold text-orange-600">{todaySales.length} transaksi</span> tercatat hari ini.
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-                className="pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 transition-all w-full sm:w-auto"
-              />
-            </div>
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-600">
+            <Calendar className="h-4 w-4 text-gray-400" />
+            {new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(new Date())}
           </div>
         </div>
 
@@ -124,7 +135,7 @@ export default function DashboardContent({ onNavigate }: DashboardContentProps) 
             </div>
             <div className="min-w-0">
               <p className="text-sm text-gray-700">
-                Your Product <span className="font-semibold">{alertProduct.name}</span> is running Low, already below <span className="font-semibold">{alertProduct.low_stock_threshold} {alertProduct.unit}.</span>
+                Stok <span className="font-semibold">{alertProduct.name}</span> tinggal {alertProduct.stock_quantity} {alertProduct.unit}; batas minimum {alertProduct.low_stock_threshold} {alertProduct.unit}.
               </p>
               <button
                 onClick={() => onNavigate('products')}

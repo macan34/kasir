@@ -9,22 +9,32 @@ import ThermalReceipt, { type ReceiptData } from './ThermalReceipt';
 
 interface POSScreenProps {
   store: Store | null;
+  mode?: 'cashier' | 'customer';
+  customerName?: string;
+  cashierName?: string;
 }
 
-export default function POSScreen({ store }: POSScreenProps) {
+export default function POSScreen({
+  store,
+  mode = 'cashier',
+  customerName: initialCustomerName = '',
+  cashierName = 'Admin Kasir',
+}: POSScreenProps) {
+  const isCustomer = mode === 'customer';
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | number>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [customerName, setCustomerName] = useState('');
+  const [customerName, setCustomerName] = useState(initialCustomerName);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [discount, setDiscount] = useState(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [completedReceiptData, setCompletedReceiptData] = useState<ReceiptData | null>(null);
+  const [createdOrder, setCreatedOrder] = useState<{ invoice_number: string; total: number } | null>(null);
   const [showThermalModal, setShowThermalModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [memberCustomers, setMemberCustomers] = useState<CustomerRecord[]>([]);
@@ -38,16 +48,18 @@ export default function POSScreen({ store }: POSScreenProps) {
 
   useEffect(() => {
     fetchData();
-    Promise.all([api.customers.getAll(), api.customers.getMemberSettings()])
-      .then(([customers, settings]) => {
-        setMemberCustomers(customers);
-        setMemberDiscountDefault(settings.default_member_discount);
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load member card data:', err);
-        setError(err instanceof Error ? err.message : 'Gagal memuat data kartu member.');
-      });
-  }, []);
+    if (!isCustomer) {
+      Promise.all([api.customers.getAll(), api.customers.getMemberSettings()])
+        .then(([customers, settings]) => {
+          setMemberCustomers(customers);
+          setMemberDiscountDefault(settings.default_member_discount);
+        })
+        .catch((err: unknown) => {
+          console.error('Failed to load member card data:', err);
+          setError(err instanceof Error ? err.message : 'Gagal memuat data kartu member.');
+        });
+    }
+  }, [isCustomer]);
 
   useEffect(() => {
     if (!loading) productBarcodeInputRef.current?.focus();
@@ -173,7 +185,7 @@ export default function POSScreen({ store }: POSScreenProps) {
 
   function clearCart() {
     setCart([]);
-    setCustomerName('');
+    setCustomerName(isCustomer ? initialCustomerName : '');
     setMemberCardCode('');
     setMemberScanStatus('');
     setProductScanCode('');
@@ -201,6 +213,10 @@ export default function POSScreen({ store }: POSScreenProps) {
 
   async function processSale() {
     if (cart.length === 0) return;
+    if (isCustomer && !customerName.trim()) {
+      setError('Nama pelanggan wajib diisi.');
+      return;
+    }
     setProcessing(true);
     setError(null);
 
@@ -217,7 +233,7 @@ export default function POSScreen({ store }: POSScreenProps) {
         discount_amount: discountAmount,
         total: total,
         payment_method: paymentMethod,
-        payment_status: 'paid',
+        payment_status: isCustomer ? 'pending' : 'paid',
       });
 
       const saleItems = cart.map(item => ({
@@ -231,12 +247,13 @@ export default function POSScreen({ store }: POSScreenProps) {
 
       await api.saleItems.createMany(saleItems);
 
-      // Decrement stock in local MySQL
-      for (const item of cart) {
-        await api.products.updateStock(
-          item.product.id,
-          Math.max(0, item.product.stock_quantity - item.quantity)
-        );
+      if (isCustomer) {
+        setCreatedOrder({ invoice_number: invoiceNumber, total });
+        setProcessing(false);
+        setCheckoutOpen(false);
+        clearCart();
+        window.dispatchEvent(new Event('retaillet:customer-orders-updated'));
+        return;
       }
 
       // Prepare complete receipt data for Epson TM-T82X
@@ -265,7 +282,7 @@ export default function POSScreen({ store }: POSScreenProps) {
         store_name: 'RETAILED POSS',
         store_address: '',
         customer_name: memberLookup?.name || customerName || 'Pelanggan Umum',
-        cashier_name: 'Admin Kasir',
+        cashier_name: isCustomer ? customerName : cashierName,
         items: Object.values(mergedReceiptItems),
         subtotal,
         tax_amount: taxAmount,
@@ -367,10 +384,10 @@ export default function POSScreen({ store }: POSScreenProps) {
                     <div className="flex items-center justify-between">
                       <span className="text-orange-600 font-bold text-sm">Rp {product.price.toLocaleString('id-ID')}</span>
                       <span className={`text-xs font-medium ${outOfStock ? 'text-red-500' : lowStock ? 'text-amber-500' : 'text-gray-400'}`}>
-                        {outOfStock ? 'Habis' : `${product.stock_quantity} ${product.unit}`}
+                        {outOfStock ? 'Habis' : isCustomer ? 'Tersedia' : `${product.stock_quantity} ${product.unit}`}
                       </span>
                     </div>
-                    {lowStock && !outOfStock && (
+                    {!isCustomer && lowStock && !outOfStock && (
                       <span className="absolute top-2 right-2 w-2 h-2 bg-amber-400 rounded-full" />
                     )}
                   </button>
@@ -394,7 +411,7 @@ export default function POSScreen({ store }: POSScreenProps) {
           )}
         </div>
 
-        <div className="p-3 border-b border-gray-100 space-y-2">
+        {!isCustomer && <div className="p-3 border-b border-gray-100 space-y-2">
           <label htmlFor="pos-product-barcode" className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
             <Barcode className="w-4 h-4 text-orange-500" /> Scan Barcode Produk
           </label>
@@ -433,10 +450,10 @@ export default function POSScreen({ store }: POSScreenProps) {
               {productScanStatus.message}
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Member card and customer */}
-        <div className="p-3 border-b border-gray-100 space-y-2">
+        {!isCustomer && <div className="p-3 border-b border-gray-100 space-y-2">
           <div className="flex gap-2">
             <input
               ref={memberCardInputRef}
@@ -487,7 +504,7 @@ export default function POSScreen({ store }: POSScreenProps) {
               <span className="font-bold">Member aktif:</span> {memberLookup.name} • REF {memberLookup.member_ref || '—'} • Diskon {memberDiscountPercentage}%
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Cart items */}
         <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
@@ -495,7 +512,7 @@ export default function POSScreen({ store }: POSScreenProps) {
             <div className="flex flex-col items-center justify-center h-full text-gray-300">
               <ShoppingCart className="w-10 h-10 mb-2" />
               <p className="text-sm">Keranjang kosong</p>
-              <p className="text-xs">Klik produk untuk menambah</p>
+              <p className="text-xs">Pilih produk untuk menambahkan ke keranjang</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -544,17 +561,17 @@ export default function POSScreen({ store }: POSScreenProps) {
                   <span className="font-medium">-Rp {memberDiscountAmount.toLocaleString('id-ID')}</span>
                 </div>
               )}
-              <div className="flex justify-between items-center text-gray-500">
-                <span>Diskon Manual</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={discount || ''}
-                  onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                  placeholder="0"
-                  className="w-24 px-2 py-1 text-right text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400"
-                />
-              </div>
+              {!isCustomer && <div className="flex justify-between items-center text-gray-500">
+                  <span>Diskon Manual</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={discount || ''}
+                    onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-24 px-2 py-1 text-right text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400"
+                  />
+              </div>}
               <div className="flex justify-between pt-2 border-t border-gray-100">
                 <span className="font-bold text-gray-800">Total Bayar</span>
                 <span className="font-bold text-orange-600 text-lg">Rp {total.toLocaleString('id-ID')}</span>
@@ -567,7 +584,7 @@ export default function POSScreen({ store }: POSScreenProps) {
               }}
               className="w-full py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors shadow-sm shadow-orange-500/20 flex items-center justify-center gap-2"
             >
-              <Receipt className="w-5 h-5" /> Bayar / Checkout
+              <Receipt className="w-5 h-5" /> {isCustomer ? 'Buat Pesanan' : 'Bayar / Checkout'}
             </button>
           </div>
         )}
@@ -578,14 +595,18 @@ export default function POSScreen({ store }: POSScreenProps) {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setCheckoutOpen(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fadeIn" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-800">Pembayaran</h3>
+              <h3 className="text-lg font-bold text-gray-800">{isCustomer ? 'Konfirmasi Pesanan' : 'Pembayaran'}</h3>
               <button onClick={() => setCheckoutOpen(false)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Metode Pembayaran</label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="text-sm font-medium text-gray-600 mb-2 block">{isCustomer ? 'Pembayaran' : 'Metode Pembayaran'}</label>
+                {isCustomer ? (
+                  <div className="rounded-xl border-2 border-orange-500 bg-orange-50 p-3 text-sm font-medium text-orange-700">
+                    QRIS Dummy — selesaikan simulasi pembayaran setelah pesanan dibuat.
+                  </div>
+                ) : <div className="grid grid-cols-3 gap-2">
                   {paymentMethods.map(pm => (
                     <button
                       key={pm.id}
@@ -596,11 +617,11 @@ export default function POSScreen({ store }: POSScreenProps) {
                       <span className="text-[11px] font-medium text-center">{pm.label}</span>
                     </button>
                   ))}
-                </div>
+                </div>}
               </div>
 
               {/* Input Nominal Bayar */}
-              {paymentMethod === 'cash' && (
+              {!isCustomer && paymentMethod === 'cash' && (
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">Uang Diterima (Rp)</label>
                   <input
@@ -638,7 +659,7 @@ export default function POSScreen({ store }: POSScreenProps) {
                   <span className="text-gray-800">Total Tagihan</span>
                   <span className="text-orange-600">Rp {total.toLocaleString('id-ID')}</span>
                 </div>
-                {paymentMethod === 'cash' && typeof amountPaid === 'number' && (
+                {!isCustomer && paymentMethod === 'cash' && typeof amountPaid === 'number' && (
                   <div className="flex justify-between pt-1 border-t border-gray-200 text-sm font-semibold">
                     <span className="text-gray-600">Kembalian</span>
                     <span className={changeAmount >= 0 ? 'text-emerald-600' : 'text-red-500'}>
@@ -652,12 +673,34 @@ export default function POSScreen({ store }: POSScreenProps) {
 
               <button
                 onClick={processSale}
-                disabled={processing || (paymentMethod === 'cash' && typeof amountPaid === 'number' && amountPaid < total)}
+                disabled={processing || (!isCustomer && paymentMethod === 'cash' && typeof amountPaid === 'number' && amountPaid < total)}
                 className="w-full py-3 bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {processing ? <><Loader2 className="w-5 h-5 animate-spin" /> Memproses...</> : <><CheckCircle2 className="w-5 h-5" /> Selesaikan & Siap Cetak</>}
+                {processing ? <><Loader2 className="w-5 h-5 animate-spin" /> Memproses...</> : <><CheckCircle2 className="w-5 h-5" /> {isCustomer ? 'Buat Pesanan & Lanjut QRIS' : 'Selesaikan & Siap Cetak'}</>}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {createdOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setCreatedOrder(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-orange-100">
+              <Receipt className="h-8 w-8 text-orange-600" />
+            </div>
+            <h3 className="mb-1 text-lg font-bold text-gray-800">Pesanan Dibuat</h3>
+            <p className="mb-3 font-mono text-sm text-orange-600">{createdOrder.invoice_number}</p>
+            <p className="mb-4 text-sm text-gray-600">
+              Total {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(createdOrder.total)}.
+              Bayar melalui simulasi QRIS di bagian <strong>Pesanan Saya</strong>. Pesanan baru diteruskan ke kasir/admin setelah pembayaran dikonfirmasi.
+            </p>
+            <button
+              onClick={() => setCreatedOrder(null)}
+              className="w-full rounded-xl bg-orange-500 py-3 font-semibold text-white hover:bg-orange-600"
+            >
+              Lihat Pesanan Saya
+            </button>
           </div>
         </div>
       )}
@@ -669,31 +712,32 @@ export default function POSScreen({ store }: POSScreenProps) {
             <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
               <CheckCircle2 className="w-9 h-9 text-emerald-600" />
             </div>
-            <h3 className="text-lg font-bold text-gray-800 mb-1">Transaksi Berhasil!</h3>
+            <h3 className="text-lg font-bold text-gray-800 mb-1">{isCustomer ? 'Pesanan Berhasil Dibuat!' : 'Transaksi Berhasil!'}</h3>
             <p className="text-sm text-gray-500 mb-3">{completedReceiptData.invoice_number}</p>
             <div className="bg-gray-50 rounded-xl py-3 px-4 mb-4 text-left space-y-1">
               <div className="flex justify-between text-xs text-gray-500">
-                <span>Total Bayar:</span>
+                <span>{isCustomer ? 'Total Pesanan:' : 'Total Bayar:'}</span>
                 <span className="font-bold text-gray-800">Rp {completedReceiptData.total.toLocaleString('id-ID')}</span>
               </div>
-              <div className="flex justify-between text-xs text-gray-500">
+              {!isCustomer && <div className="flex justify-between text-xs text-gray-500">
                 <span>Kembalian:</span>
                 <span className="font-bold text-emerald-600">Rp {(completedReceiptData.change_amount || 0).toLocaleString('id-ID')}</span>
-              </div>
+              </div>}
             </div>
+            {isCustomer && <p className="mb-4 text-xs text-gray-500">Pembayaran dilakukan di toko saat mengambil pesanan.</p>}
 
             <div className="space-y-2">
-              <button
+              {!isCustomer && <button
                 onClick={() => setShowThermalModal(true)}
                 className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-all shadow-md shadow-orange-500/20 flex items-center justify-center gap-2"
               >
                 <Printer className="w-5 h-5" /> Cetak Struk (Epson TM-T82X)
-              </button>
+              </button>}
               <button
                 onClick={() => setCompletedReceiptData(null)}
                 className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
               >
-                Transaksi Baru
+                {isCustomer ? 'Lanjut Belanja' : 'Transaksi Baru'}
               </button>
             </div>
           </div>

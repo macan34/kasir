@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
 
 function getMemberFields(body) {
   const memberRef = String(body.member_ref || '').trim() || null;
@@ -32,7 +33,7 @@ async function ensureMemberRefAvailable(memberRef, customerId) {
 }
 
 // GET /api/customers - List customers from tbl_pelanggan
-router.get('/', async (req, res) => {
+router.get('/', requireRole('superadmin', 'cashier'), async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT id_pelanggan AS id, nama_pelanggan AS name, kota AS city, created_at,
@@ -46,7 +47,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/member-settings', async (req, res) => {
+router.get('/member-settings', requireRole('superadmin', 'cashier'), async (req, res) => {
   try {
     const [rows] = await pool.query(
       "SELECT setting_value FROM tbl_pos_settings WHERE setting_key = 'member_default_discount' LIMIT 1"
@@ -58,7 +59,7 @@ router.get('/member-settings', async (req, res) => {
   }
 });
 
-router.put('/member-settings', async (req, res) => {
+router.put('/member-settings', requireRole('superadmin'), async (req, res) => {
   try {
     const discount = Number(req.body.default_member_discount);
     if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
@@ -79,7 +80,7 @@ router.put('/member-settings', async (req, res) => {
 });
 
 // POST /api/customers - Add customer (triggers after_insert_pelanggan!)
-router.post('/', async (req, res) => {
+router.post('/', requireRole('superadmin'), async (req, res) => {
   try {
     const { name, city } = req.body;
     const memberFields = getMemberFields(req.body);
@@ -111,7 +112,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/customers/:id - Update customer (triggers after_pelanggan_update & after_update_pelanggan!)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, city } = req.body;
@@ -138,7 +139,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/customers/:id - Delete customer
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('superadmin'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM tbl_pelanggan WHERE id_pelanggan = ?', [id]);

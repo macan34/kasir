@@ -16,7 +16,7 @@ Aplikasi kasir dan inventaris berbasis React, Vite, Express, dan MySQL/MariaDB. 
 
 ## Fitur
 
-- **Dashboard** untuk melihat ringkasan penjualan dan inventaris.
+- **Dashboard** membaca transaksi, produk, stok, pelanggan, dan cabang langsung dari database. Nilai retur/pembelian/pengeluaran tidak ditampilkan karena tabel sumbernya belum tersedia di skema database saat ini.
 - **Kasir POS** untuk mencari produk, memindai SKU/barcode, mengatur jumlah barang, menerapkan diskon, memilih metode pembayaran, dan menyimpan transaksi.
 - **Produk** untuk menambah, mengubah, mencari, dan menghapus produk beserta SKU, barcode, harga, biaya, stok, satuan, dan kategori.
 - **Label barcode** untuk mencetak label produk dalam format CODE128.
@@ -26,6 +26,10 @@ Aplikasi kasir dan inventaris berbasis React, Vite, Express, dan MySQL/MariaDB. 
 - **Kategori** untuk menambah, mengubah, dan menghapus kategori produk.
 - **Log aktivitas** untuk melihat log sistem dan perubahan nama pelanggan yang dicatat database.
 - **Outlet/cabang** dapat dipilih melalui pemilih lokasi di header bila data outlet tersedia. Nota menggunakan nama **RETAILED POSS** dan tidak mencetak alamat/cabang.
+- **Login berbasis akun** dengan peran Super Admin, kasir, dan pelanggan. Pelanggan dapat melihat produk, membuat pesanan, lalu menyelesaikan simulasi QRIS dummy sebelum pesanan muncul untuk persetujuan kasir/Super Admin.
+- **Persetujuan pesanan** menampilkan pesanan pelanggan yang sudah dibayar; kasir atau Super Admin dapat melihat rincian dan menyetujui pesanan. QRIS pada aplikasi ini hanya simulasi lokal dan tidak memproses uang sungguhan.
+- **Super Admin** dapat membuat, mengubah, menonaktifkan, dan menghapus akun kasir/pelanggan serta mengelola data pelanggan/member.
+- **Kasir dibatasi ke layanan pembelian:** setelah login langsung membuka POS, dengan akses ke POS dan riwayat transaksi saja. Kasir tidak dapat menambah/mengubah/menghapus produk atau kategori, mengelola stok, maupun membuka fitur cetak barcode.
 
 ## Persyaratan
 
@@ -51,7 +55,7 @@ mysql -u root -p db_kita < database\migration_add_pos_columns.sql
 
 Masukkan kata sandi MySQL saat diminta. Jika menggunakan phpMyAdmin, buat/pilih database `db_kita`, impor `database/db_kita.sql`, lalu jalankan `database/migration_add_pos_columns.sql` pada database tersebut.
 
-Backend membuat kolom dan tabel pengaturan kartu member secara otomatis saat pertama kali dijalankan. Skrip `database/migration_member_cards.sql` tersedia jika perlu menjalankan perubahan member secara manual.
+Backend membuat tabel akun, kolom member, dan tabel pengaturan kartu member secara otomatis saat pertama kali dijalankan. Skrip `database/migration_member_cards.sql` tersedia jika perlu menjalankan perubahan member secara manual.
 
 ### 2. Atur koneksi database
 
@@ -64,9 +68,11 @@ DB_USER=root
 DB_PASSWORD=ganti_dengan_kata_sandi_mysql
 DB_NAME=db_kita
 PORT=3001
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=ganti_dengan_password_kuat_minimal_8_karakter
 ```
 
-Jika akun MySQL tidak memiliki kata sandi, kosongkan `DB_PASSWORD`. Saat menjalankan perintah dari folder utama proyek, backend membaca `.env` dari folder tersebut. Backend dan konfigurasi proxy Vite sama-sama mengharapkan API di port `3001`; jika port ini diubah, sesuaikan juga target proxy di `vite.config.ts`.
+Pilih username dan password Super Admin sendiri; jangan gunakan contoh password di atas. Akun Super Admin pertama dibuat hanya bila belum ada akun Super Admin. Simpan `.env` dengan aman dan jangan commit ke Git. Jika akun MySQL tidak memiliki kata sandi, kosongkan `DB_PASSWORD`. Saat menjalankan perintah dari folder utama proyek, backend membaca `.env` dari folder tersebut. Backend dan konfigurasi proxy Vite sama-sama mengharapkan API di port `3001`; jika port ini diubah, sesuaikan juga target proxy di `vite.config.ts`.
 
 ### 3. Pasang dependensi
 
@@ -140,6 +146,22 @@ Barcode label menggunakan nilai barcode produk; jika kosong, label menggunakan S
 
 POS menghitung PPN 11%. Diskon manual dan diskon member mengurangi subtotal; diskon member mengikuti diskon khusus pelanggan jika diatur, atau diskon default admin jika diskon khusus bernilai 0.
 
+### Akses pelanggan
+
+1. Super Admin membuat akun pelanggan pada **Super Admin & Logs → Akun Pengguna**.
+2. Pada halaman sambutan, pilih **Belanja sebagai pelanggan** dan masuk menggunakan username/password yang diberikan.
+3. Cari produk, pilih jumlahnya, lalu tekan **Buat Pesanan**.
+4. Pesanan tercatat dengan status menunggu pembayaran dan dibayar di toko saat pengambilan. Stok berkurang saat pesanan dibuat.
+
+### Mengelola akun dan pelanggan
+
+1. Masuk sebagai Super Admin menggunakan akun bootstrap yang diatur melalui `BOOTSTRAP_ADMIN_USERNAME` dan `BOOTSTRAP_ADMIN_PASSWORD`.
+2. Buka **Super Admin & Logs → Akun Pengguna** untuk membuat akun kasir/pelanggan, mengubah nama/username/peran, mengatur ulang password, menonaktifkan, atau menghapus akun.
+3. Buka **Data Pelanggan** pada halaman yang sama untuk menambah, mengedit, atau menghapus data pelanggan dan pengaturan member.
+4. Akun Super Admin utama tidak dapat diubah atau dihapus dari daftar akun.
+
+Untuk mengisi database baru dengan akun awal, jalankan `npm run seed:users` dari folder proyek. Seeder membuat akun `admin`, `kasir`, dan `pelanggan` yang belum tersedia, memberi password acak kuat, serta menampilkan password hanya saat akun baru dibuat. Simpan password dari output terminal dengan aman. Seeder dapat dijalankan ulang tanpa mengganti password akun yang sudah ada.
+
 ### Menggunakan kartu member
 
 1. Buka **Pelanggan** lalu **Tambah Pelanggan**.
@@ -202,7 +224,10 @@ Simpan file cadangan di lokasi aman yang bukan folder publik aplikasi. Sebelum m
 
 ## Catatan keamanan dan batasan
 
-- Aplikasi ini ditujukan untuk penggunaan lokal/lingkungan tepercaya dan belum menyediakan autentikasi pengguna atau pembagian hak akses.
+- Password akun disimpan sebagai hash scrypt, bukan teks biasa. Sesi login berlaku 12 jam dan disimpan di memori backend, jadi server restart akan mengakhiri sesi.
+- Semua API selain login/status dan pemeriksaan kesehatan mewajibkan sesi login. Perubahan produk, kategori, stok, pelanggan, dan log dibatasi untuk Super Admin; kasir/pelanggan tidak dapat menambah atau menaikkan stok produk.
+- Aplikasi ditujukan untuk penggunaan lokal/lingkungan tepercaya. Jangan mengekspos API ke internet tanpa konfigurasi HTTPS, pembatasan asal, perlindungan percobaan login, dan peninjauan keamanan deployment.
+- Pilih **Keluar** untuk mengakhiri sesi login.
 - Jangan mengekspos port API `3001` ke internet atau meneruskan port melalui router tanpa menambahkan pengamanan yang sesuai.
 - Simpan `.env` dan cadangan database dengan aman; jangan memasukkan kata sandi atau data kartu pelanggan ke repositori publik.
 - Menu **Print QR Code** saat ini masih membuka halaman label barcode CODE128, bukan generator QR.

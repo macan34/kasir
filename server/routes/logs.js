@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
+
+router.use(requireRole('superadmin'));
 
 // GET /api/logs - Get activity logs from tbl_log & log_pelanggan
 router.get('/', async (req, res) => {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
 
 // GET /api/stores - List all branches from tbl_cabang
 router.get('/', async (req, res) => {
@@ -16,7 +17,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/stores - Create new branch
-router.post('/', async (req, res) => {
+router.post('/', requireRole('superadmin'), async (req, res) => {
   try {
     const { name, address } = req.body;
     const [result] = await pool.query(

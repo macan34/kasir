@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import {
-  LayoutDashboard, ShieldCheck, Package, PlusSquare, CalendarX, AlertTriangle,
+  LayoutDashboard, ShieldCheck, ClipboardCheck, Package, PlusSquare, CalendarX, AlertTriangle,
   FolderTree, Folders, Tag, Ruler, Layers, Shield, Barcode, QrCode,
   Boxes, SlidersHorizontal, ArrowLeftRight, ChevronLeft, ChevronRight,
   ChevronDown, ShoppingBag, ShoppingCart, Receipt, Users, type LucideIcon
 } from 'lucide-react';
-import { navSections } from '@/data/mockData';
+import { navSections } from '@/data/navigation';
 
 const iconMap: Record<string, LucideIcon> = {
-  LayoutDashboard, ShieldCheck, Package, PlusSquare, CalendarX, AlertTriangle,
+  LayoutDashboard, ShieldCheck, ClipboardCheck, Package, PlusSquare, CalendarX, AlertTriangle,
   FolderTree, Folders, Tag, Ruler, Layers, Shield, Barcode, QrCode,
   Boxes, SlidersHorizontal, ArrowLeftRight, ShoppingCart, Receipt, Users,
 };
@@ -18,9 +18,10 @@ interface SidebarProps {
   onToggle: () => void;
   activeItem: string;
   onSelect: (id: string) => void;
+  role: 'superadmin' | 'cashier' | 'customer';
 }
 
-export default function Sidebar({ collapsed, onToggle, activeItem, onSelect }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, activeItem, onSelect, role }: SidebarProps) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     Main: true,
     Inventory: true,
@@ -46,51 +47,60 @@ export default function Sidebar({ collapsed, onToggle, activeItem, onSelect }: S
 
       {/* Navigation */}
       <nav className="overflow-y-auto h-[calc(100vh-8rem)] py-4 scrollbar-thin">
-        {navSections.map((section) => (
-          <div key={section.title} className="mb-1">
-            {!collapsed && (
-              <button
-                onClick={() => toggleSection(section.title)}
-                className="flex items-center justify-between w-full px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 hover:text-gray-600"
-              >
-                {section.title}
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openSections[section.title] ? '' : '-rotate-90'}`} />
-              </button>
-            )}
-            {collapsed && (
-              <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-300 text-center">•</div>
-            )}
-            {(openSections[section.title] || collapsed) && (
-              <div className="space-y-0.5 px-2">
-                {section.items.map((item) => {
-                  const Icon = iconMap[item.icon] || Package;
-                  const isActive = activeItem === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => onSelect(item.id)}
-                      title={collapsed ? item.label : undefined}
-                      className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative ${
-                        isActive
-                          ? 'bg-orange-50 text-orange-600'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
-                    >
-                      {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-orange-500 rounded-r" />}
-                      <Icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-orange-500' : 'text-gray-400 group-hover:text-gray-600'}`} />
-                      {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
-                      {!collapsed && item.badge && (
-                        <span className={`text-[10px] font-bold text-white px-1.5 py-0.5 rounded-full ${item.badgeColor || 'bg-gray-400'}`}>
-                          {item.badge}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+        {navSections.map((section) => {
+          const visibleItems = section.items.filter(item => {
+            if (role === 'superadmin') return true;
+            if (role === 'cashier') return item.id === 'pos' || item.id === 'orders' || item.id === 'transactions';
+            return false;
+          });
+          if (!visibleItems.length) return null;
+
+          return (
+            <div key={section.title} className="mb-1">
+              {!collapsed && (
+                <button
+                  onClick={() => toggleSection(section.title)}
+                  className="flex items-center justify-between w-full px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 hover:text-gray-600"
+                >
+                  {section.title}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openSections[section.title] ? '' : '-rotate-90'}`} />
+                </button>
+              )}
+              {collapsed && (
+                <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-300 text-center">•</div>
+              )}
+              {(openSections[section.title] || collapsed) && (
+                <div className="space-y-0.5 px-2">
+                  {visibleItems.map((item) => {
+                    const Icon = iconMap[item.icon] || Package;
+                    const isActive = activeItem === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => onSelect(item.id)}
+                        title={collapsed ? item.label : undefined}
+                        className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative ${
+                          isActive
+                            ? 'bg-orange-50 text-orange-600'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
+                      >
+                        {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-orange-500 rounded-r" />}
+                        <Icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-orange-500' : 'text-gray-400 group-hover:text-gray-600'}`} />
+                        {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
+                        {!collapsed && item.badge && (
+                          <span className={`text-[10px] font-bold text-white px-1.5 py-0.5 rounded-full ${item.badgeColor || 'bg-gray-400'}`}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               </div>
-            )}
-          </div>
-        ))}
+            );
+        })}
       </nav>
 
       {/* Collapse Toggle */}
