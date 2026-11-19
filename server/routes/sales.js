@@ -1,7 +1,9 @@
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const pool = require('../db');
 const { requireRole } = require('../middleware/auth');
+const { createDuitkuInvoice } = require('../duitku');
 
 let columnsChecked = false;
 let hasCustomColumns = false;
@@ -118,7 +120,7 @@ router.get('/orders', requireRole('superadmin', 'cashier'), async (_req, res) =>
         COALESCE(t.invoice_number, CONCAT('INV-', LPAD(t.id_transaksi, 6, '0'))) AS invoice_number,
         COALESCE(t.customer_name, p.nama_pelanggan, 'Pelanggan Umum') AS customer_name,
         t.total_belanja AS total,
-        COALESCE(t.payment_method, 'qris_dummy') AS payment_method,
+        COALESCE(t.payment_method, 'qris') AS payment_method,
         t.payment_status,
         t.order_status,
         (SELECT COUNT(*) FROM tbl_detail_transaksi dt WHERE dt.id_transaksi = t.id_transaksi) AS item_count,
@@ -142,9 +144,10 @@ router.get('/my-orders', requireRole('customer'), async (req, res) => {
         t.id_transaksi AS id,
         COALESCE(t.invoice_number, CONCAT('INV-', LPAD(t.id_transaksi, 6, '0'))) AS invoice_number,
         t.total_belanja AS total,
-        COALESCE(t.payment_method, 'qris_dummy') AS payment_method,
+        COALESCE(t.payment_method, 'qris') AS payment_method,
         COALESCE(t.payment_status, 'pending') AS payment_status,
         t.order_status,
+        t.duitku_payment_url AS payment_url,
         (SELECT COUNT(*) FROM tbl_detail_transaksi dt WHERE dt.id_transaksi = t.id_transaksi) AS item_count,
         COALESCE(t.created_at, TIMESTAMP(t.tanggal)) AS created_at
       FROM tbl_transaksi t
@@ -159,13 +162,32 @@ router.get('/my-orders', requireRole('customer'), async (req, res) => {
   }
 });
 
-router.post('/:id/pay-dummy', requireRole('customer'), async (req, res) => {
+router.get('/:id/payment-status', requireRole('superadmin', 'cashier', 'customer'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id_transaksi AS id, payment_status, order_status,
+              duitku_payment_url AS payment_url
+       FROM tbl_transaksi
+       WHERE id_transaksi = ?${req.user.role === 'customer' ? ' AND created_by_user_id = ?' : ''}`,
+      req.user.role === 'customer' ? [req.params.id, req.user.id] : [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error fetching payment status:', err);
+    res.status(500).json({ error: 'Gagal memeriksa status pembayaran.' });
+  }
+});
+
+router.post('/:id/duitku-payment', requireRole('superadmin', 'cashier', 'customer'), async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [orders] = await connection.query(
-      `SELECT id_transaksi, created_by_user_id, payment_status, order_status
+      `SELECT id_transaksi, created_by_user_id, payment_status, order_status,
+              payment_method, total_belanja, customer_name, duitku_merchant_order_id,
+              duitku_payment_url, duitku_customer_email
        FROM tbl_transaksi WHERE id_transaksi = ? FOR UPDATE`,
       [req.params.id]
     );
@@ -174,62 +196,91 @@ router.post('/:id/pay-dummy', requireRole('customer'), async (req, res) => {
       return res.status(404).json({ error: 'Pesanan tidak ditemukan.' });
     }
 
-    const order = orders[0];
-    if (String(order.created_by_user_id) !== String(req.user.id)) {
+    const sale = orders[0];
+    if (req.user.role === 'customer' && String(sale.created_by_user_id) !== String(req.user.id)) {
       await connection.rollback();
       return res.status(403).json({ error: 'Pesanan ini bukan milik akun Anda.' });
     }
-    if (order.payment_status !== 'pending' || order.order_status !== 'awaiting_payment') {
+    if (!['qris', 'va', 'card'].includes(sale.payment_method) ||
+        !['pending', 'failed'].includes(sale.payment_status) ||
+        sale.order_status !== 'awaiting_payment') {
       await connection.rollback();
       return res.status(409).json({ error: 'Pesanan tidak lagi menunggu pembayaran.' });
     }
 
+    if (sale.payment_status === 'pending' && sale.duitku_payment_url) {
+      await connection.commit();
+      return res.json({
+        payment_url: sale.duitku_payment_url,
+        payment_method: sale.payment_method,
+        payment_status: sale.payment_status,
+      });
+    }
+
     const [details] = await connection.query(
-      'SELECT id_produk, jumlah FROM tbl_detail_transaksi WHERE id_transaksi = ?',
-      [order.id_transaksi]
+      `SELECT dt.id_produk, dt.jumlah, dt.product_name, dt.unit_price
+       FROM tbl_detail_transaksi dt WHERE dt.id_transaksi = ?`,
+      [sale.id_transaksi]
     );
     if (!details.length) {
       await connection.rollback();
-      return res.status(409).json({ error: 'Pesanan belum memiliki barang.' });
+      return res.status(409).json({ error: 'Transaksi belum memiliki barang.' });
     }
 
-    const quantities = new Map();
-    for (const detail of details) {
-      const productId = Number(detail.id_produk);
-      quantities.set(productId, (quantities.get(productId) || 0) + Number(detail.jumlah));
+    const email = String(req.body.email || sale.duitku_customer_email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Alamat email yang valid wajib diisi untuk pembayaran Duitku.' });
     }
 
-    for (const [productId, quantity] of quantities) {
-      const [products] = await connection.query(
-        'SELECT id_produk, nama_produk, stok FROM tbl_produk WHERE id_produk = ? FOR UPDATE',
-        [productId]
-      );
-      if (!products.length || Number(products[0].stok) < quantity) {
-        await connection.rollback();
-        return res.status(409).json({
-          error: products.length
-            ? `Stok ${products[0].nama_produk} tidak mencukupi untuk pesanan ini.`
-            : 'Salah satu produk pesanan sudah tidak tersedia.',
-        });
-      }
-      await connection.query(
-        'UPDATE tbl_produk SET stok = stok - ? WHERE id_produk = ?',
-        [quantity, productId]
-      );
+    const paymentAmount = Math.round(Number(sale.total_belanja));
+    if (!Number.isSafeInteger(paymentAmount) || paymentAmount < 1) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Total pembayaran tidak valid.' });
     }
 
+    const merchantOrderId = `R${Date.now().toString(36)}${crypto.randomBytes(8).toString('hex')}`;
     await connection.query(
       `UPDATE tbl_transaksi
-       SET payment_method = 'qris_dummy', payment_status = 'paid', order_status = 'pending_approval'
+       SET duitku_merchant_order_id = ?, duitku_customer_email = ?,
+           duitku_reference = NULL, duitku_payment_url = NULL,
+           duitku_va_number = NULL, duitku_qr_string = NULL, payment_status = 'pending'
        WHERE id_transaksi = ?`,
-      [order.id_transaksi]
+      [merchantOrderId, email, sale.id_transaksi]
     );
     await connection.commit();
-    res.json({ success: true, payment_status: 'paid', order_status: 'pending_approval' });
+
+    const invoice = await createDuitkuInvoice({
+      merchantOrderId,
+      amount: paymentAmount,
+      paymentMethod: sale.payment_method,
+      productDetails: `Pembayaran ${sale.id_transaksi}`,
+      customerName: sale.customer_name || req.user.name || 'Pelanggan',
+      email,
+      phoneNumber: req.body.phone_number,
+      items: [{
+        product_name: `Total pesanan ${sale.id_transaksi} (termasuk pajak dan diskon)`,
+        unit_price: paymentAmount,
+        quantity: 1,
+      }],
+    });
+
+    await pool.query(
+      `UPDATE tbl_transaksi
+       SET duitku_reference = ?, duitku_payment_url = ?, duitku_va_number = ?, duitku_qr_string = ?
+       WHERE id_transaksi = ? AND duitku_merchant_order_id = ?`,
+      [invoice.reference, invoice.payment_url, invoice.va_number, invoice.qr_string, sale.id_transaksi, merchantOrderId]
+    );
+    res.json({
+      payment_url: invoice.payment_url,
+      payment_method: sale.payment_method,
+      payment_status: 'pending',
+      va_number: invoice.va_number,
+    });
   } catch (err) {
     if (connection) await connection.rollback();
-    console.error('Error confirming simulated QRIS payment:', err);
-    res.status(500).json({ error: 'Gagal mengonfirmasi pembayaran simulasi.' });
+    console.error('Error creating Duitku payment:', err);
+    res.status(502).json({ error: err.message || 'Gagal membuat pembayaran Duitku.' });
   } finally {
     if (connection) connection.release();
   }
@@ -358,9 +409,14 @@ router.post('/', requireRole('superadmin', 'cashier', 'customer'), async (req, r
     }
 
     const isCustomerOrder = req.user.role === 'customer';
-    const finalPaymentStatus = isCustomerOrder ? 'pending' : 'paid';
-    const finalOrderStatus = isCustomerOrder ? 'awaiting_payment' : 'approved';
-    const finalPaymentMethod = isCustomerOrder ? 'qris_dummy' : payment_method || 'cash';
+    const validPaymentMethods = isCustomerOrder ? ['qris', 'va'] : ['cash', 'card', 'qris', 'va'];
+    if (!validPaymentMethods.includes(payment_method)) {
+      return res.status(400).json({ error: 'Metode pembayaran tidak valid.' });
+    }
+    const requiresDuitku = ['qris', 'va', 'card'].includes(payment_method);
+    const finalPaymentStatus = isCustomerOrder || requiresDuitku ? 'pending' : 'paid';
+    const finalOrderStatus = isCustomerOrder || requiresDuitku ? 'awaiting_payment' : 'approved';
+    const finalPaymentMethod = payment_method;
 
     // Match or create customer in tbl_pelanggan
     let id_pelanggan = 1;

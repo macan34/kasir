@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, QrCode, RefreshCw } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Sale } from '@/types';
 
@@ -10,7 +10,8 @@ const currency = new Intl.NumberFormat('id-ID', {
 });
 
 function getOrderStatus(sale: Sale) {
-  if (sale.payment_status !== 'paid') return 'Menunggu pembayaran QRIS';
+  if (sale.payment_status === 'failed') return 'Pembayaran gagal';
+  if (sale.payment_status !== 'paid') return 'Menunggu pembayaran Duitku';
   if (sale.order_status === 'pending_approval') return 'Menunggu persetujuan kasir';
   if (sale.order_status === 'approved') return 'Disetujui';
   return sale.order_status || 'Status tidak diketahui';
@@ -21,8 +22,7 @@ export default function CustomerOrdersPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [payingOrder, setPayingOrder] = useState<Sale | null>(null);
-  const [paying, setPaying] = useState(false);
+  const [preparingPayment, setPreparingPayment] = useState<string | number | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setError(null);
@@ -47,28 +47,29 @@ export default function CustomerOrdersPanel() {
     };
   }, [fetchOrders]);
 
-  async function confirmDummyPayment() {
-    if (!payingOrder) return;
-    setPaying(true);
+  async function preparePayment(order: Sale) {
+    setPreparingPayment(order.id);
     setPaymentError(null);
     try {
-      await api.sales.payDummy(payingOrder.id);
-      setPayingOrder(null);
+      const payment = await api.sales.createDuitkuPayment(order.id);
+      setOrders(current => current.map(item => String(item.id) === String(order.id)
+        ? { ...item, payment_url: payment.payment_url, payment_status: payment.payment_status }
+        : item));
       await fetchOrders();
     } catch (err) {
-      console.error('Error confirming dummy QRIS payment:', err);
-      setPaymentError(err instanceof Error ? err.message : 'Pembayaran simulasi gagal.');
+      console.error('Error preparing Duitku payment:', err);
+      setPaymentError(err instanceof Error ? err.message : 'Gagal menyiapkan pembayaran Duitku.');
     } finally {
-      setPaying(false);
+      setPreparingPayment(null);
     }
   }
 
   return (
-    <section className="mt-6 rounded-xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+    <section className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-gray-800">Pesanan Saya</h2>
-          <p className="text-sm text-gray-500">Pesanan hanya dikirim ke kasir/admin setelah pembayaran QRIS dummy dikonfirmasi.</p>
+          <p className="text-sm text-gray-500">Pesanan diteruskan ke kasir/admin hanya setelah pembayaran Duitku terverifikasi.</p>
         </div>
         <button
           onClick={() => void fetchOrders()}
@@ -111,12 +112,24 @@ export default function CustomerOrdersPanel() {
                   {getOrderStatus(order)}
                 </span>
                 {order.payment_status !== 'paid' && order.order_status === 'awaiting_payment' && (
-                  <button
-                    onClick={() => { setPayingOrder(order); setPaymentError(null); }}
-                    className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white hover:bg-orange-600"
-                  >
-                    Bayar QRIS Dummy
-                  </button>
+                  order.payment_url && order.payment_status === 'pending' ? (
+                    <a
+                      href={order.payment_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white hover:bg-orange-600"
+                    >
+                      Lanjutkan Pembayaran
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => void preparePayment(order)}
+                      disabled={preparingPayment !== null}
+                      className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+                    >
+                      {preparingPayment === order.id ? 'Menyiapkan...' : order.payment_status === 'failed' ? 'Ulangi Pembayaran' : 'Siapkan Pembayaran'}
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -124,46 +137,7 @@ export default function CustomerOrdersPanel() {
         </div>
       )}
 
-      {payingOrder && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => !paying && setPayingOrder(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-100 text-orange-600">
-                <QrCode className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-gray-800">Pembayaran QRIS Dummy</h3>
-                <p className="text-xs text-gray-500">{payingOrder.invoice_number}</p>
-              </div>
-            </div>
-            <div className="rounded-xl border-2 border-dashed border-orange-200 bg-orange-50 p-5 text-center">
-              <p className="text-xs font-bold tracking-widest text-orange-700">QRIS SIMULASI</p>
-              <p className="mt-2 text-2xl font-bold text-gray-800">{currency.format(Number(payingOrder.total))}</p>
-              <p className="mt-1 break-all font-mono text-xs text-gray-500">REF-{payingOrder.invoice_number}</p>
-            </div>
-            <p className="my-4 text-xs leading-relaxed text-gray-500">
-              Ini hanya simulasi lokal, bukan QR pembayaran sungguhan dan tidak memotong saldo. Setelah dikonfirmasi, pesanan diteruskan ke kasir/admin.
-            </p>
-            {paymentError && <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPayingOrder(null)}
-                disabled={paying}
-                className="flex-1 rounded-lg border border-gray-200 px-3 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-              >
-                Nanti
-              </button>
-              <button
-                onClick={() => void confirmDummyPayment()}
-                disabled={paying}
-                className="flex-1 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {paying ? 'Memproses...' : 'Simulasikan Pembayaran'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {paymentError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
     </section>
   );
 }

@@ -76,7 +76,13 @@ ALTER TABLE `tbl_transaksi`
   ADD COLUMN IF NOT EXISTS `order_status` VARCHAR(24) NOT NULL DEFAULT 'approved' AFTER `created_at`,
   ADD COLUMN IF NOT EXISTS `created_by_user_id` BIGINT UNSIGNED NULL AFTER `order_status`,
   ADD COLUMN IF NOT EXISTS `approved_by_user_id` BIGINT UNSIGNED NULL AFTER `created_by_user_id`,
-  ADD COLUMN IF NOT EXISTS `approved_at` TIMESTAMP NULL DEFAULT NULL AFTER `approved_by_user_id`;
+  ADD COLUMN IF NOT EXISTS `approved_at` TIMESTAMP NULL DEFAULT NULL AFTER `approved_by_user_id`,
+  ADD COLUMN IF NOT EXISTS `duitku_merchant_order_id` VARCHAR(50) NULL,
+  ADD COLUMN IF NOT EXISTS `duitku_reference` VARCHAR(100) NULL,
+  ADD COLUMN IF NOT EXISTS `duitku_payment_url` VARCHAR(1000) NULL,
+  ADD COLUMN IF NOT EXISTS `duitku_va_number` VARCHAR(50) NULL,
+  ADD COLUMN IF NOT EXISTS `duitku_qr_string` TEXT NULL,
+  ADD COLUMN IF NOT EXISTS `duitku_customer_email` VARCHAR(255) NULL;
 
 -- Add FK for store_id on transaksi
 DELIMITER $$

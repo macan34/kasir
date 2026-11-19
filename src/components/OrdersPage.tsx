@@ -75,7 +75,7 @@ export default function OrdersPage() {
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-xl font-bold text-gray-800">Persetujuan Pesanan</h1>
-          <p className="text-sm text-gray-500">Hanya pesanan yang sudah membayar QRIS dummy yang masuk ke daftar ini.</p>
+          <p className="text-sm text-gray-500">Hanya pesanan yang sudah dibayar dan terverifikasi Duitku yang masuk ke daftar ini.</p>
         </div>
         <button
           onClick={() => void fetchOrders()}

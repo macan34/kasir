@@ -1,3 +1,4 @@
+.
 # Retaillet POS
 
 Aplikasi kasir dan inventaris berbasis React, Vite, Express, dan MySQL/MariaDB. Data produk, pelanggan, stok, dan transaksi disimpan di database lokal.
@@ -17,7 +18,7 @@ Aplikasi kasir dan inventaris berbasis React, Vite, Express, dan MySQL/MariaDB. 
 ## Fitur
 
 - **Dashboard** membaca transaksi, produk, stok, pelanggan, dan cabang langsung dari database. Nilai retur/pembelian/pengeluaran tidak ditampilkan karena tabel sumbernya belum tersedia di skema database saat ini.
-- **Kasir POS** untuk mencari produk, memindai SKU/barcode, mengatur jumlah barang, menerapkan diskon, memilih metode pembayaran, dan menyimpan transaksi.
+- **Kasir POS** untuk mencari produk, memindai SKU/barcode, mengatur jumlah barang, menerapkan diskon, dan menyimpan transaksi. Pembayaran QRIS, Virtual Account, dan kartu diproses melalui Duitku; nota baru dapat dicetak setelah callback pembayaran terverifikasi.
 - **Produk** untuk menambah, mengubah, mencari, dan menghapus produk beserta SKU, barcode, harga, biaya, stok, satuan, dan kategori.
 - **Label barcode** untuk mencetak label produk dalam format CODE128.
 - **Pelanggan dan kartu member** dengan kode REF kartu, diskon khusus pelanggan, serta diskon default yang dapat diatur admin.
@@ -26,8 +27,8 @@ Aplikasi kasir dan inventaris berbasis React, Vite, Express, dan MySQL/MariaDB. 
 - **Kategori** untuk menambah, mengubah, dan menghapus kategori produk.
 - **Log aktivitas** untuk melihat log sistem dan perubahan nama pelanggan yang dicatat database.
 - **Outlet/cabang** dapat dipilih melalui pemilih lokasi di header bila data outlet tersedia. Nota menggunakan nama **RETAILED POSS** dan tidak mencetak alamat/cabang.
-- **Login berbasis akun** dengan peran Super Admin, kasir, dan pelanggan. Pelanggan dapat melihat produk, membuat pesanan, lalu menyelesaikan simulasi QRIS dummy sebelum pesanan muncul untuk persetujuan kasir/Super Admin.
-- **Persetujuan pesanan** menampilkan pesanan pelanggan yang sudah dibayar; kasir atau Super Admin dapat melihat rincian dan menyetujui pesanan. QRIS pada aplikasi ini hanya simulasi lokal dan tidak memproses uang sungguhan.
+- **Login berbasis akun** dengan peran Super Admin, kasir, dan pelanggan. Pelanggan memilih QRIS atau Virtual Account Duitku dan harus menyelesaikan pembayaran sebelum pesanan diteruskan ke kasir/Super Admin.
+- **Persetujuan pesanan** hanya menampilkan pesanan pelanggan yang status pembayarannya sudah terverifikasi melalui callback Duitku; kasir atau Super Admin dapat melihat rincian dan menyetujui pesanan.
 - **Super Admin** dapat membuat, mengubah, menonaktifkan, dan menghapus akun kasir/pelanggan serta mengelola data pelanggan/member.
 - **Kasir dibatasi ke layanan pembelian:** setelah login langsung membuka POS, dengan akses ke POS dan riwayat transaksi saja. Kasir tidak dapat menambah/mengubah/menghapus produk atau kategori, mengelola stok, maupun membuka fitur cetak barcode.
 
@@ -55,7 +56,7 @@ mysql -u root -p db_kita < database\migration_add_pos_columns.sql
 
 Masukkan kata sandi MySQL saat diminta. Jika menggunakan phpMyAdmin, buat/pilih database `db_kita`, impor `database/db_kita.sql`, lalu jalankan `database/migration_add_pos_columns.sql` pada database tersebut.
 
-Backend membuat tabel akun, kolom member, dan tabel pengaturan kartu member secara otomatis saat pertama kali dijalankan. Skrip `database/migration_member_cards.sql` tersedia jika perlu menjalankan perubahan member secara manual.
+Backend membuat tabel akun, kolom member, tabel pengaturan kartu member, dan kolom transaksi Duitku secara otomatis saat pertama kali dijalankan. Skrip `database/migration_member_cards.sql` tersedia jika perlu menjalankan perubahan member secara manual; kolom POS/pembayaran juga didefinisikan di `database/migration_add_pos_columns.sql`.
 
 ### 2. Atur koneksi database
 
@@ -70,9 +71,18 @@ DB_NAME=db_kita
 PORT=3001
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=ganti_dengan_password_kuat_minimal_8_karakter
+DUITKU_ENV=sandbox
+DUITKU_MERCHANT_CODE=kode_merchant_dari_duitku
+DUITKU_API_KEY=api_key_dari_duitku
+DUITKU_CALLBACK_URL=https://domain-publik-anda/api/duitku/callback
+DUITKU_RETURN_URL=https://domain-publik-anda/
 ```
 
 Pilih username dan password Super Admin sendiri; jangan gunakan contoh password di atas. Akun Super Admin pertama dibuat hanya bila belum ada akun Super Admin. Simpan `.env` dengan aman dan jangan commit ke Git. Jika akun MySQL tidak memiliki kata sandi, kosongkan `DB_PASSWORD`. Saat menjalankan perintah dari folder utama proyek, backend membaca `.env` dari folder tersebut. Backend dan konfigurasi proxy Vite sama-sama mengharapkan API di port `3001`; jika port ini diubah, sesuaikan juga target proxy di `vite.config.ts`.
+
+Isi konfigurasi Duitku dari portal merchant. `DUITKU_ENV` bernilai `sandbox` untuk uji coba atau `production` untuk transaksi aktif. Callback harus memakai URL HTTPS publik yang dapat diakses Duitku; alamat localhost tidak dapat menerima konfirmasi pembayaran. Metode bawaan adalah QRIS Shopee (`SP`), BCA Virtual Account (`BC`), dan kartu kredit (`VC`). Jika metode yang aktif pada akun Duitku berbeda, atur `DUITKU_QRIS_METHOD`, `DUITKU_VA_METHOD`, atau `DUITKU_CARD_METHOD` ke kode metode yang disediakan Duitku. Email pelanggan diminta saat checkout online dan disimpan pada transaksi untuk menyiapkan ulang tautan pembayaran. ID pesanan merchant dibuat unik untuk setiap percobaan; jika Duitku menolak permintaan, pesan kesalahan dari gateway ditampilkan agar konfigurasi/metode yang bermasalah dapat diketahui.
+
+Transaksi online tetap berstatus menunggu pembayaran sampai callback bertanda tangan valid dan nominalnya cocok. Rincian Duitku dikirim sebagai satu baris total agar jumlah rincian sama persis dengan tagihan (termasuk pajak/diskon); rincian produk tetap tersedia di nota aplikasi. Pesanan pelanggan baru muncul di daftar persetujuan setelah callback sukses. Daftar transaksi dan endpoint detail nota hanya memuat transaksi yang sudah lunas.
 
 ### 3. Pasang dependensi
 

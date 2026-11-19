@@ -13,6 +13,7 @@ const stockRouter = require('./routes/stock');
 const logsRouter = require('./routes/logs');
 const authRouter = require('./routes/auth');
 const usersRouter = require('./routes/users');
+const duitkuRouter = require('./routes/duitku');
 const { hashPassword } = require('./auth/passwords');
 const { requireAuth } = require('./middleware/auth');
 
@@ -25,6 +26,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use('/api/duitku', duitkuRouter);
 
 // Routes
 app.use('/api/auth', authRouter);
@@ -95,7 +97,13 @@ async function startServer() {
         ADD COLUMN IF NOT EXISTS order_status VARCHAR(24) NOT NULL DEFAULT 'approved',
         ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT UNSIGNED NULL,
         ADD COLUMN IF NOT EXISTS approved_by_user_id BIGINT UNSIGNED NULL,
-        ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP NULL DEFAULT NULL
+        ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP NULL DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS duitku_merchant_order_id VARCHAR(50) NULL,
+        ADD COLUMN IF NOT EXISTS duitku_reference VARCHAR(100) NULL,
+        ADD COLUMN IF NOT EXISTS duitku_payment_url VARCHAR(1000) NULL,
+        ADD COLUMN IF NOT EXISTS duitku_va_number VARCHAR(50) NULL,
+        ADD COLUMN IF NOT EXISTS duitku_qr_string TEXT NULL,
+        ADD COLUMN IF NOT EXISTS duitku_customer_email VARCHAR(255) NULL
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tbl_pos_settings (

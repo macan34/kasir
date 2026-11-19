@@ -13,7 +13,7 @@ import CustomersPage from '@/components/CustomersPage';
 import BarcodePrintPage from '@/components/BarcodePrintPage';
 import ActivityLogsPage from '@/components/ActivityLogsPage';
 import WelcomePage from '@/components/WelcomePage';
-import { ShoppingCart } from 'lucide-react';
+import { ClipboardList, ShoppingCart } from 'lucide-react';
 import { api, type AppUser } from '@/lib/api';
 import type { Store } from '@/types';
 
@@ -25,6 +25,9 @@ function App() {
   const [activeItem, setActiveItem] = useState('dashboard');
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+  const [customerPage, setCustomerPage] = useState<'catalog' | 'orders'>(() => (
+    new URLSearchParams(window.location.search).get('page') === 'orders' ? 'orders' : 'catalog'
+  ));
 
   const fetchStores = useCallback(async () => {
     try {
@@ -181,9 +184,35 @@ function App() {
             </div>
             <div>
               <p className="font-bold text-gray-800">Retaillet</p>
-              <p className="text-xs text-gray-500">Katalog Produk</p>
+              <p className="text-xs text-gray-500">{customerPage === 'orders' ? 'Pesanan Saya' : 'Belanja Produk'}</p>
             </div>
           </div>
+          <nav className="flex items-center gap-1" aria-label="Navigasi pelanggan">
+            <button
+              onClick={() => setCustomerPage('catalog')}
+              aria-current={customerPage === 'catalog' ? 'page' : undefined}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                customerPage === 'catalog'
+                  ? 'bg-orange-50 text-orange-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+              }`}
+            >
+              <ShoppingCart className="h-4 w-4" />
+              <span className="hidden sm:inline">Belanja</span>
+            </button>
+            <button
+              onClick={() => setCustomerPage('orders')}
+              aria-current={customerPage === 'orders' ? 'page' : undefined}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                customerPage === 'orders'
+                  ? 'bg-orange-50 text-orange-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+              }`}
+            >
+              <ClipboardList className="h-4 w-4" />
+              <span className="hidden sm:inline">Pesanan Saya</span>
+            </button>
+          </nav>
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-gray-600 sm:inline">Hai, {user.name}</span>
             <button onClick={handleLogout} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
@@ -192,12 +221,17 @@ function App() {
           </div>
         </header>
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
-          <div className="mb-4">
-            <h1 className="text-xl font-bold text-gray-800">Belanja Produk</h1>
-            <p className="text-sm text-gray-500">Pilih produk untuk dimasukkan ke keranjang dan buat pesanan.</p>
-          </div>
-          <POSScreen store={selectedStore} mode="customer" customerName={user.name} />
-          <CustomerOrdersPanel />
+          {customerPage === 'orders' ? (
+            <CustomerOrdersPanel />
+          ) : (
+            <>
+              <div className="mb-4">
+                <h1 className="text-xl font-bold text-gray-800">Belanja Produk</h1>
+                <p className="text-sm text-gray-500">Pilih produk untuk dimasukkan ke keranjang dan buat pesanan.</p>
+              </div>
+              <POSScreen store={selectedStore} mode="customer" customerName={user.name} />
+            </>
+          )}
         </main>
       </div>
     );

@@ -42,6 +42,7 @@ export interface Sale {
   payment_method: string;
   payment_status: string;
   order_status?: string;
+  payment_url?: string | null;
   item_count?: number;
   created_at: string;
   stores?: Store;

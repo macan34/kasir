@@ -11,9 +11,17 @@ async function checkColumns() {
   if (columnsChecked) return hasCustomColumns;
   try {
     const [cols] = await pool.query(
-      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tbl_produk' AND COLUMN_NAME = 'sku'"
+      `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'tbl_produk'
+         AND COLUMN_NAME IN ('sku', 'barcode', 'store_id', 'cost', 'low_stock_threshold', 'unit', 'image_url', 'updated_at')`
     );
-    hasCustomColumns = cols.length > 0;
+    const availableColumns = new Set(cols.map(column => column.COLUMN_NAME));
+    hasCustomColumns = [
+      'sku', 'barcode', 'store_id', 'cost',
+      'low_stock_threshold', 'unit', 'image_url', 'updated_at',
+    ].every(column => availableColumns.has(column));
     columnsChecked = true;
   } catch (e) {
     hasCustomColumns = false;

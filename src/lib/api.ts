@@ -181,8 +181,22 @@ export const api = {
     },
     getOrders: async (): Promise<Sale[]> => fetchJSON(`${API_BASE}/sales/orders`),
     getMyOrders: async (): Promise<Sale[]> => fetchJSON(`${API_BASE}/sales/my-orders`),
-    payDummy: async (id: string | number): Promise<{ success: boolean; payment_status: string; order_status: string }> => {
-      return fetchJSON(`${API_BASE}/sales/${id}/pay-dummy`, { method: 'POST' });
+    getPaymentStatus: async (id: string | number): Promise<{
+      id: string | number;
+      payment_status: string;
+      order_status: string;
+      payment_url: string | null;
+    }> => fetchJSON(`${API_BASE}/sales/${id}/payment-status`),
+    createDuitkuPayment: async (id: string | number, email?: string): Promise<{
+      payment_url: string;
+      payment_method: string;
+      payment_status: string;
+      va_number?: string | null;
+    }> => {
+      return fetchJSON(`${API_BASE}/sales/${id}/duitku-payment`, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
     },
     approveOrder: async (id: string | number): Promise<{ success: boolean; order_status: string }> => {
       return fetchJSON(`${API_BASE}/sales/${id}/approve`, { method: 'POST' });
@@ -195,7 +209,7 @@ export const api = {
       tax_amount: number;
       discount_amount: number;
       total: number;
-      payment_method: string;
+      payment_method: 'cash' | 'card' | 'qris' | 'va';
       payment_status: string;
     }): Promise<Sale> => {
       return fetchJSON(`${API_BASE}/sales`, {

@@ -50,7 +50,8 @@ router.post('/', requireRole('superadmin', 'cashier', 'customer'), async (req, r
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [sales] = await connection.query(
-      `SELECT id_transaksi, created_by_user_id, payment_status, order_status
+      `SELECT id_transaksi, created_by_user_id, payment_status, order_status,
+              payment_method, discount_amount
        FROM tbl_transaksi WHERE id_transaksi = ? LIMIT 1 FOR UPDATE`,
       [saleId]
     );
@@ -64,8 +65,13 @@ router.post('/', requireRole('superadmin', 'cashier', 'customer'), async (req, r
       return res.status(403).json({ error: 'Anda tidak dapat mengubah pesanan milik akun lain.' });
     }
     const isCustomerOrder = req.user.role === 'customer';
-    const expectedOrderStatus = isCustomerOrder ? 'awaiting_payment' : 'approved';
-    const expectedPaymentStatus = isCustomerOrder ? 'pending' : 'paid';
+    const requiresDuitku = ['qris', 'va', 'card'].includes(sale.payment_method);
+    if (isCustomerOrder && !requiresDuitku) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Pesanan pelanggan wajib menggunakan pembayaran online.' });
+    }
+    const expectedPaymentStatus = isCustomerOrder || requiresDuitku ? 'pending' : 'paid';
+    const expectedOrderStatus = isCustomerOrder || requiresDuitku ? 'awaiting_payment' : 'approved';
     if (sale.order_status !== expectedOrderStatus || sale.payment_status !== expectedPaymentStatus) {
       await connection.rollback();
       return res.status(409).json({ error: 'Pesanan tidak dapat diubah pada status saat ini.' });
@@ -123,15 +129,15 @@ router.post('/', requireRole('superadmin', 'cashier', 'customer'), async (req, r
       );
     }
 
-    if (isCustomerOrder) {
+    if (requiresDuitku) {
       const verifiedSubtotal = values.reduce((sum, item) => sum + item[3], 0);
       const verifiedTax = Math.round(verifiedSubtotal * 0.11);
+      const verifiedDiscount = Math.min(Math.max(0, Number(sale.discount_amount) || 0), verifiedSubtotal);
       await connection.query(
         `UPDATE tbl_transaksi
-         SET subtotal = ?, tax_amount = ?, discount_amount = 0, total_belanja = ?,
-             payment_method = 'qris_dummy'
+         SET subtotal = ?, tax_amount = ?, discount_amount = ?, total_belanja = ?
          WHERE id_transaksi = ?`,
-        [verifiedSubtotal, verifiedTax, verifiedSubtotal + verifiedTax, saleId]
+        [verifiedSubtotal, verifiedTax, verifiedDiscount, verifiedSubtotal + verifiedTax - verifiedDiscount, saleId]
       );
     } else {
       for (const [productId, quantity] of quantities) {

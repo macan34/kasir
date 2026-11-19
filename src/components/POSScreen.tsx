@@ -14,6 +14,14 @@ interface POSScreenProps {
   cashierName?: string;
 }
 
+interface PendingPayment {
+  id: string | number;
+  invoice_number: string;
+  total: number;
+  payment_method: string;
+  payment_url: string | null;
+}
+
 export default function POSScreen({
   store,
   mode = 'cashier',
@@ -28,13 +36,15 @@ export default function POSScreen({
   const [activeCategory, setActiveCategory] = useState<string | number>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState(initialCustomerName);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'qris' | 'va'>(isCustomer ? 'qris' : 'cash');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [discount, setDiscount] = useState(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [completedReceiptData, setCompletedReceiptData] = useState<ReceiptData | null>(null);
-  const [createdOrder, setCreatedOrder] = useState<{ invoice_number: string; total: number } | null>(null);
+  const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
+  const [paymentSetupError, setPaymentSetupError] = useState<string | null>(null);
   const [showThermalModal, setShowThermalModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [memberCustomers, setMemberCustomers] = useState<CustomerRecord[]>([]);
@@ -64,6 +74,64 @@ export default function POSScreen({
   useEffect(() => {
     if (!loading) productBarcodeInputRef.current?.focus();
   }, [loading]);
+
+  useEffect(() => {
+    if (!pendingPayment) return;
+    const activePayment = pendingPayment;
+    let active = true;
+
+    async function checkPaymentStatus() {
+      try {
+        const status = await api.sales.getPaymentStatus(activePayment.id);
+        if (!active || status.payment_status !== 'paid') {
+          if (active && status.payment_status === 'failed') {
+            setPaymentSetupError('Pembayaran gagal. Silakan coba tautan pembayaran lagi atau hubungi kasir.');
+          }
+          return;
+        }
+
+        if (isCustomer) {
+          setPendingPayment(null);
+          window.dispatchEvent(new Event('retaillet:customer-orders-updated'));
+          return;
+        }
+
+        const sale = await api.sales.getById(activePayment.id);
+        if (!active) return;
+        setCompletedReceiptData({
+          invoice_number: sale.invoice_number,
+          created_at: sale.created_at,
+          store_name: 'RETAILED POSS',
+          store_address: '',
+          customer_name: sale.customer_name || 'Pelanggan Umum',
+          cashier_name: cashierName,
+          items: sale.items.map(item => ({
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_price: Number(item.unit_price),
+            line_total: Number(item.line_total),
+          })),
+          subtotal: Number(sale.subtotal),
+          tax_amount: Number(sale.tax_amount),
+          discount_amount: Number(sale.discount_amount),
+          total: Number(sale.total),
+          payment_method: sale.payment_method,
+          amount_paid: Number(sale.total),
+          change_amount: 0,
+        });
+        setPendingPayment(null);
+      } catch (err) {
+        console.error('Error checking Duitku payment status:', err);
+      }
+    }
+
+    void checkPaymentStatus();
+    const intervalId = window.setInterval(() => { void checkPaymentStatus(); }, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [pendingPayment, isCustomer, cashierName]);
 
   async function fetchData() {
     setLoading(true);
@@ -116,6 +184,7 @@ export default function POSScreen({
   const total = subtotal + taxAmount - discountAmount;
   const cashGiven = typeof amountPaid === 'number' ? amountPaid : total;
   const changeAmount = Math.max(0, cashGiven - total);
+  const isDuitkuPayment = ['qris', 'va', 'card'].includes(paymentMethod);
 
   function addToCart(product: Product) {
     if (product.stock_quantity <= 0) return;
@@ -217,11 +286,18 @@ export default function POSScreen({
       setError('Nama pelanggan wajib diisi.');
       return;
     }
+    const isOnlinePayment = ['qris', 'va', 'card'].includes(paymentMethod);
+    if (isOnlinePayment && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim())) {
+      setError('Masukkan alamat email yang valid untuk pembayaran Duitku.');
+      return;
+    }
     setProcessing(true);
     setError(null);
+    setPaymentSetupError(null);
 
     const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
     const finalPaid = typeof amountPaid === 'number' && amountPaid > 0 ? amountPaid : total;
+    let onlineSale: { id: string | number; invoice_number: string } | null = null;
 
     try {
       const saleData = await api.sales.create({
@@ -247,12 +323,23 @@ export default function POSScreen({
 
       await api.saleItems.createMany(saleItems);
 
-      if (isCustomer) {
-        setCreatedOrder({ invoice_number: invoiceNumber, total });
+      if (isOnlinePayment) {
+        onlineSale = { id: saleData.id, invoice_number: invoiceNumber };
+        setPendingPayment({
+          id: saleData.id,
+          invoice_number: invoiceNumber,
+          total,
+          payment_method: paymentMethod,
+          payment_url: null,
+        });
         setProcessing(false);
         setCheckoutOpen(false);
         clearCart();
-        window.dispatchEvent(new Event('retaillet:customer-orders-updated'));
+        if (isCustomer) window.dispatchEvent(new Event('retaillet:customer-orders-updated'));
+        const payment = await api.sales.createDuitkuPayment(saleData.id, customerEmail.trim());
+        setPendingPayment(current => current && String(current.id) === String(saleData.id)
+          ? { ...current, payment_url: payment.payment_url }
+          : current);
         return;
       }
 
@@ -300,16 +387,38 @@ export default function POSScreen({
       await fetchData();
     } catch (err: unknown) {
       console.error('Process sale error:', err);
-      setError(err instanceof Error ? err.message : 'Gagal menyelesaikan transaksi');
+      if (onlineSale) {
+        setPaymentSetupError(err instanceof Error ? err.message : 'Gagal membuat pembayaran Duitku.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Gagal menyelesaikan transaksi');
+      }
+      setProcessing(false);
+    }
+  }
+
+  async function retryDuitkuPayment() {
+    if (!pendingPayment) return;
+    setProcessing(true);
+    setPaymentSetupError(null);
+    try {
+      const payment = await api.sales.createDuitkuPayment(pendingPayment.id);
+      setPendingPayment(current => current && String(current.id) === String(pendingPayment.id)
+        ? { ...current, payment_url: payment.payment_url }
+        : current);
+    } catch (err) {
+      console.error('Error retrying Duitku payment:', err);
+      setPaymentSetupError(err instanceof Error ? err.message : 'Gagal membuat pembayaran Duitku.');
+    } finally {
       setProcessing(false);
     }
   }
 
   const paymentMethods = [
     { id: 'cash', label: 'Tunai (Cash)', icon: Banknote },
-    { id: 'card', label: 'Kartu Debit/Kredit', icon: CreditCard },
-    { id: 'transfer', label: 'Transfer / QRIS', icon: Wallet },
-  ];
+    { id: 'qris', label: 'QRIS (Duitku)', icon: Wallet },
+    { id: 'va', label: 'Virtual Account', icon: Receipt },
+    { id: 'card', label: 'Kartu (Duitku)', icon: CreditCard },
+  ] as const;
 
   if (loading) {
     return (
@@ -602,12 +711,8 @@ export default function POSScreen({
             <div className="space-y-4">
               <div>
                 <label className="text-sm font-medium text-gray-600 mb-2 block">{isCustomer ? 'Pembayaran' : 'Metode Pembayaran'}</label>
-                {isCustomer ? (
-                  <div className="rounded-xl border-2 border-orange-500 bg-orange-50 p-3 text-sm font-medium text-orange-700">
-                    QRIS Dummy — selesaikan simulasi pembayaran setelah pesanan dibuat.
-                  </div>
-                ) : <div className="grid grid-cols-3 gap-2">
-                  {paymentMethods.map(pm => (
+                <div className={`grid gap-2 ${isCustomer ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
+                  {(isCustomer ? paymentMethods.filter(pm => ['qris', 'va'].includes(pm.id)) : paymentMethods).map(pm => (
                     <button
                       key={pm.id}
                       onClick={() => setPaymentMethod(pm.id)}
@@ -617,8 +722,23 @@ export default function POSScreen({
                       <span className="text-[11px] font-medium text-center">{pm.label}</span>
                     </button>
                   ))}
-                </div>}
+                </div>
               </div>
+
+              {isDuitkuPayment && (
+                <div>
+                  <label htmlFor="duitku-customer-email" className="text-sm font-medium text-gray-700 mb-1 block">Email untuk pembayaran</label>
+                  <input
+                    id="duitku-customer-email"
+                    type="email"
+                    required
+                    value={customerEmail}
+                    onChange={event => setCustomerEmail(event.target.value)}
+                    placeholder="nama@email.com"
+                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                  />
+                </div>
+              )}
 
               {/* Input Nominal Bayar */}
               {!isCustomer && paymentMethod === 'cash' && (
@@ -676,31 +796,48 @@ export default function POSScreen({
                 disabled={processing || (!isCustomer && paymentMethod === 'cash' && typeof amountPaid === 'number' && amountPaid < total)}
                 className="w-full py-3 bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {processing ? <><Loader2 className="w-5 h-5 animate-spin" /> Memproses...</> : <><CheckCircle2 className="w-5 h-5" /> {isCustomer ? 'Buat Pesanan & Lanjut QRIS' : 'Selesaikan & Siap Cetak'}</>}
+                {processing ? <><Loader2 className="w-5 h-5 animate-spin" /> Memproses...</> : <><CheckCircle2 className="w-5 h-5" /> {isDuitkuPayment ? 'Lanjutkan ke Pembayaran Duitku' : 'Selesaikan & Siap Cetak'}</>}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {createdOrder && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setCreatedOrder(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl" onClick={event => event.stopPropagation()}>
+      {pendingPayment && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl">
             <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-orange-100">
-              <Receipt className="h-8 w-8 text-orange-600" />
+              <Wallet className="h-8 w-8 text-orange-600" />
             </div>
-            <h3 className="mb-1 text-lg font-bold text-gray-800">Pesanan Dibuat</h3>
-            <p className="mb-3 font-mono text-sm text-orange-600">{createdOrder.invoice_number}</p>
+            <h3 className="mb-1 text-lg font-bold text-gray-800">Menunggu Pembayaran Duitku</h3>
+            <p className="mb-2 font-mono text-sm text-orange-600">{pendingPayment.invoice_number}</p>
             <p className="mb-4 text-sm text-gray-600">
-              Total {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(createdOrder.total)}.
-              Bayar melalui simulasi QRIS di bagian <strong>Pesanan Saya</strong>. Pesanan baru diteruskan ke kasir/admin setelah pembayaran dikonfirmasi.
+              {pendingPayment.payment_method === 'qris' ? 'QRIS' : pendingPayment.payment_method === 'va' ? 'Virtual Account' : 'Kartu'} ·{' '}
+              {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(pendingPayment.total)}
+              . Nota hanya tersedia setelah pembayaran terverifikasi.
             </p>
-            <button
-              onClick={() => setCreatedOrder(null)}
-              className="w-full rounded-xl bg-orange-500 py-3 font-semibold text-white hover:bg-orange-600"
-            >
-              Lihat Pesanan Saya
-            </button>
+            {paymentSetupError && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-left text-sm text-red-700">{paymentSetupError}</p>}
+            {pendingPayment.payment_url ? (
+              <a
+                href={pendingPayment.payment_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mb-2 flex w-full items-center justify-center rounded-xl bg-orange-500 py-3 font-semibold text-white hover:bg-orange-600"
+              >
+                Buka Pembayaran Duitku
+              </a>
+            ) : null}
+            {(!pendingPayment.payment_url || paymentSetupError) && (
+              <button
+                onClick={() => void retryDuitkuPayment()}
+                disabled={processing}
+                className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+              >
+                {processing && <Loader2 className="h-4 w-4 animate-spin" />}
+                Coba Siapkan Pembayaran Lagi
+              </button>
+            )}
+            <p className="text-xs text-gray-500">Status diperbarui otomatis. Jangan buat pesanan baru sebelum pembayaran ini selesai.</p>
           </div>
         </div>
       )}
